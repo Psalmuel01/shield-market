@@ -6,6 +6,7 @@ import { Share2 } from "lucide-react";
 import { useAccount, usePublicClient, useReadContract, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 import { shieldBetConfig } from "@/lib/contract";
 import { uploadMarketMetadata } from "@/lib/filecoin";
+import { cidToExplorer } from "@/lib/format";
 
 const categories = ["Crypto", "Politics", "Sports", "Science", "Other"];
 
@@ -83,7 +84,7 @@ export default function CreateMarketPage() {
       }
 
       setStatusMessage("Uploading metadata to Filecoin...");
-      const marketCid = await uploadMarketMetadata({
+      const uploaded = await uploadMarketMetadata({
         marketId,
         question: question.trim(),
         creator: address,
@@ -91,6 +92,7 @@ export default function CreateMarketPage() {
         category,
         resolutionCriteria
       });
+      const marketCid = uploaded.cid;
 
       setStatusMessage("Anchoring CID on-chain...");
       const anchorHash = await writeContractAsync({
@@ -103,7 +105,7 @@ export default function CreateMarketPage() {
 
       setCreatedMarketId(marketId);
       setCid(marketCid);
-      setStatusMessage("Market created and metadata anchored.");
+      setStatusMessage(`Market created and metadata anchored (${uploaded.provider}/${uploaded.network}).`);
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Create market failed");
     }
@@ -196,7 +198,7 @@ export default function CreateMarketPage() {
                 </a>
                 {cid && (
                   <a
-                    href={`https://calibration.filfox.info/en/message/${cid}`}
+                    href={cidToExplorer(cid)}
                     target="_blank"
                     rel="noreferrer"
                     className="text-xs font-semibold text-indigo-600 underline underline-offset-2 dark:text-indigo-300"

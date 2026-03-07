@@ -20,5 +20,5 @@ export function getCountdown(deadline: bigint) {
 
 export function cidToExplorer(cid: string) {
   if (!cid) return "";
-  return `https://calibration.filfox.info/en/message/${cid}`;
+  return `https://cid.ipfs.tech/#${cid}`;
 }

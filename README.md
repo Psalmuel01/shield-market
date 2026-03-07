@@ -2,12 +2,12 @@
 
 Confidential prediction markets prototype for PL Genesis 2026.
 
-ShieldBet implements a two-surface dApp (Markets dashboard + Bet page) backed by a market smart contract with encrypted-position interfaces, resolution flow, claim logic, and Filecoin/Lit integration seams.
+ShieldBet implements a two-surface dApp (Markets dashboard + Bet page) backed by a market smart contract with encrypted-position interfaces, resolution flow, claim logic, and Filecoin/Lit integrations.
 
 ## Monorepo Layout
 
 - `contracts/`: Hardhat project with `ShieldBet.sol`, tests, and deploy script.
-- `frontend/`: Next.js app with RainbowKit wallet connect, dashboard, bet page, and mock Lit claim endpoint.
+- `frontend/`: Next.js app with RainbowKit wallet connect, dashboard, bet page, Synapse Filecoin upload route, and Lit-assisted claim verification flow.
 
 ## Architecture
 
@@ -15,8 +15,8 @@ ShieldBet implements a two-surface dApp (Markets dashboard + Bet page) backed by
 flowchart LR
   U[User Wallet] --> F[Next.js Frontend]
   F --> C[ShieldBet.sol on Zama Testnet]
-  F --> L[Lit Action API Seam]
-  F --> FI[Filecoin Upload Seam]
+  F --> L[Lit Action Execution]
+  F --> FI[Synapse Upload API]
   FI --> FC[Filecoin Calibration CID]
   C --> FC
   L --> U
@@ -59,9 +59,12 @@ Notes:
   - confidential position confirmation
   - owner admin controls (resolve + assign payout)
   - claim flow + Lit response reveal
-- `app/api/lit/claim` integration seam:
-  - returns mock decrypted payout if Lit secrets are absent
-  - returns Lit-mode payload when `LIT_ACTION_CID` is configured
+- `app/api/filecoin/upload`:
+  - uploads canonical market/resolution JSON payloads to Filecoin via Synapse SDK
+  - returns a real PieceCID for on-chain anchoring
+- `app/api/lit/claim`:
+  - verifies `WinningsClaimed` event data from claim tx receipt
+  - returns verified payout and optional Lit attestation payload
 
 ## Quick Start
 
@@ -115,9 +118,13 @@ Open [http://localhost:3000](http://localhost:3000)
 - `NEXT_PUBLIC_FHEVM_VERIFY_DECRYPTION_CONTRACT`
 - `NEXT_PUBLIC_FHEVM_VERIFY_INPUT_CONTRACT`
 - `NEXT_PUBLIC_FHEVM_GATEWAY_CHAIN_ID`
-- `LIT_ACTION_CID` (optional)
-- `LIT_NETWORK` (optional)
-- `LIT_RECAP` (optional)
+- `NEXT_PUBLIC_LIT_ACTION_CID` (optional, enables Lit Action execution in claim flow)
+- `NEXT_PUBLIC_LIT_NETWORK` (optional, default: `datil`)
+- `FILECOIN_UPLOAD_MODE` (`synapse` or `mock`)
+- `FILECOIN_NETWORK` (`calibration`, `mainnet`, `devnet`)
+- `FILECOIN_RPC_URL` (optional custom RPC URL for selected Filecoin network)
+- `FILECOIN_WALLET_PRIVATE_KEY` (required for `synapse` mode)
+- `FILECOIN_WITH_CDN` (optional, default `false`)
 
 ## Demo Flow (PRD-aligned)
 
@@ -130,5 +137,5 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ## Next Integration Tasks
 
-- Replace `lib/filecoin.ts` mocks with Synapse SDK uploads to Calibration testnet.
-- Replace `/api/lit/claim` mock path with real PKP + Lit Action execution and access-control checks.
+- Move winner payout assignment from manual admin input to oracle/Lit Action automation.
+- Add explicit Lit Action response schema validation and replay protection.

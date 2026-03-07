@@ -3,14 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { Clock3, ExternalLink, EyeOff, FileText, Lock, Shield, Wallet } from "lucide-react";
+import { Clock3, ExternalLink, EyeOff, FileText, Wallet } from "lucide-react";
 import { formatEther, getAddress, isAddress, parseEther } from "viem";
-import { useAccount, useBalance, useReadContract, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
+import { useAccount, useBalance, usePublicClient, useReadContract, useWaitForTransactionReceipt, useWalletClient, useWriteContract } from "wagmi";
 import { BetPlacement } from "@/components/bet-placement";
-import { ClaimFlow } from "@/components/claim-flow";
+import { ClaimConfirmation, ClaimFlow } from "@/components/claim-flow";
 import { EncryptedActivity } from "@/components/encrypted-activity";
 import { EncryptedBands } from "@/components/encrypted-bands";
 import { BetOutcome, encryptBetInputs } from "@/lib/encryption";
+import { uploadResolution } from "@/lib/filecoin";
 import { cidToExplorer, formatDeadline, getCountdown } from "@/lib/format";
 import { shieldBetConfig } from "@/lib/contract";
 import { getEncryptedBandCount, inferCategory, getMarketStatus } from "@/lib/market-ui";
@@ -36,7 +37,10 @@ export default function MarketBetPage() {
   const [localPosition, setLocalPosition] = useState<"YES" | "NO" | "Encrypted">("Encrypted");
 
   const { address } = useAccount();
+  const publicClient = usePublicClient();
+  const { data: walletClient } = useWalletClient();
   const { data: balance } = useBalance({ address });
+  const litActionCid = process.env.NEXT_PUBLIC_LIT_ACTION_CID;
 
   const { writeContractAsync, data: hash, isPending } = useWriteContract();
   const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash });
@@ -151,8 +155,26 @@ export default function MarketBetPage() {
     }
   }
 
-  async function executeClaim() {
+  async function executeClaim(): Promise<ClaimConfirmation> {
     if (!address) throw new Error("Connect wallet first");
+    const normalizedAccount = getAddress(address);
+
+    let litExecution: { actionCid: string; response: unknown; logs: string } | null = null;
+    if (litActionCid) {
+      if (!walletClient) {
+        throw new Error("Wallet signer not ready for Lit action execution");
+      }
+
+      setStatusMessage("Running Lit Action eligibility check...");
+      const { runLitClaimAction } = await import("@/lib/lit");
+      litExecution = await runLitClaimAction({
+        actionCid: litActionCid,
+        marketId: marketId.toString(),
+        account: normalizedAccount,
+        expectedPayoutWei: claimPayout.toString(),
+        walletClient
+      });
+    }
 
     const txHash = await writeContractAsync({
       ...shieldBetConfig,
@@ -160,29 +182,80 @@ export default function MarketBetPage() {
       args: [marketId]
     });
 
-    await fetch("/api/lit/claim", {
+    const receipt = await publicClient?.waitForTransactionReceipt({ hash: txHash });
+    if (!receipt || receipt.status !== "success") {
+      throw new Error("Claim transaction failed or was not confirmed");
+    }
+
+    const verifyResponse = await fetch("/api/lit/claim", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
         marketId: marketId.toString(),
-        account: address,
+        account: normalizedAccount,
         txHash,
-        expectedPayoutWei: claimPayout.toString()
+        expectedPayoutWei: claimPayout.toString(),
+        litActionCid: litExecution?.actionCid || "",
+        litResponse: litExecution?.response ?? null,
+        litLogs: litExecution?.logs || ""
       })
     });
+
+    const verifyBody = (await verifyResponse.json()) as {
+      error?: string;
+      mode: "verify" | "lit";
+      txHash: string;
+      plaintextPayoutWei: string;
+      actionCid?: string;
+    };
+
+    if (!verifyResponse.ok) {
+      throw new Error(verifyBody.error || "Claim verification failed");
+    }
+
+    setStatusMessage(verifyBody.mode === "lit" ? "Claim verified with Lit and submitted." : "Claim verified on-chain and submitted.");
+    return verifyBody;
   }
 
   async function resolveMarket() {
     try {
       setAdminMessage(null);
-      await writeContractAsync({
+      setAdminMessage("Submitting market resolution...");
+      const resolveHash = await writeContractAsync({
         ...shieldBetConfig,
         functionName: "resolveMarket",
         args: [marketId, adminResolveOutcome]
       });
-      setAdminMessage("Market resolution transaction sent.");
+
+      const resolveReceipt = await publicClient?.waitForTransactionReceipt({ hash: resolveHash });
+      if (!resolveReceipt || resolveReceipt.status !== "success") {
+        throw new Error("Resolution transaction failed");
+      }
+
+      setAdminMessage("Uploading resolution artifact to Filecoin...");
+      const upload = await uploadResolution({
+        marketId,
+        outcome: adminResolveOutcome,
+        resolver: address || "",
+        timestamp: Math.floor(Date.now() / 1000),
+        txHash: resolveHash,
+        question
+      });
+
+      setAdminMessage("Anchoring resolution CID on-chain...");
+      const anchorHash = await writeContractAsync({
+        ...shieldBetConfig,
+        functionName: "anchorResolutionCID",
+        args: [marketId, upload.cid]
+      });
+      const anchorReceipt = await publicClient?.waitForTransactionReceipt({ hash: anchorHash });
+      if (!anchorReceipt || anchorReceipt.status !== "success") {
+        throw new Error("Resolution CID anchoring transaction failed");
+      }
+
+      setAdminMessage(`Market resolved and CID anchored (${upload.provider}/${upload.network}).`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to resolve market";
       setAdminMessage(message);

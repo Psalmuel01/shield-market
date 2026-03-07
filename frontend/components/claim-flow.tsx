@@ -4,11 +4,18 @@ import { Loader2, Lock, Sparkles } from "lucide-react";
 import { formatEther } from "viem";
 import { useEffect, useState } from "react";
 
+export interface ClaimConfirmation {
+  mode: "verify" | "lit";
+  txHash: string;
+  plaintextPayoutWei: string;
+  actionCid?: string;
+}
+
 interface ClaimFlowProps {
   open: boolean;
   onClose: () => void;
   payoutWei: bigint;
-  onConfirmClaim: () => Promise<void>;
+  onConfirmClaim: () => Promise<ClaimConfirmation>;
 }
 
 type ClaimStage = "idle" | "lit" | "ready" | "submitting" | "done" | "error";
@@ -16,11 +23,13 @@ type ClaimStage = "idle" | "lit" | "ready" | "submitting" | "done" | "error";
 export function ClaimFlow({ open, onClose, payoutWei, onConfirmClaim }: ClaimFlowProps) {
   const [stage, setStage] = useState<ClaimStage>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [claimResult, setClaimResult] = useState<ClaimConfirmation | null>(null);
 
   useEffect(() => {
     if (!open) {
       setStage("idle");
       setError(null);
+      setClaimResult(null);
       return;
     }
 
@@ -31,13 +40,15 @@ export function ClaimFlow({ open, onClose, payoutWei, onConfirmClaim }: ClaimFlo
 
   if (!open) return null;
 
-  const winnings = Number(formatEther(payoutWei)).toFixed(4);
+  const payoutWeiToDisplay = claimResult ? BigInt(claimResult.plaintextPayoutWei) : payoutWei;
+  const winnings = Number(formatEther(payoutWeiToDisplay)).toFixed(4);
 
   async function submitClaim() {
     try {
       setStage("submitting");
       setError(null);
-      await onConfirmClaim();
+      const result = await onConfirmClaim();
+      setClaimResult(result);
       setStage("done");
     } catch (cause) {
       setStage("error");
@@ -89,7 +100,8 @@ export function ClaimFlow({ open, onClose, payoutWei, onConfirmClaim }: ClaimFlo
 
           {stage === "done" ? (
             <p className="flex items-center gap-2 rounded-lg bg-emerald-100 px-3 py-2 text-sm font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-              <Sparkles className="h-4 w-4" /> Claim submitted to wallet.
+              <Sparkles className="h-4 w-4" />
+              {claimResult?.mode === "lit" ? "Claim submitted with Lit verification." : "Claim submitted to wallet."}
             </p>
           ) : (
             <button
@@ -101,6 +113,10 @@ export function ClaimFlow({ open, onClose, payoutWei, onConfirmClaim }: ClaimFlo
               CLAIM TO WALLET
             </button>
           )}
+
+          {claimResult?.txHash ? (
+            <p className="text-xs text-slate-500 dark:text-slate-400">Transaction: {claimResult.txHash}</p>
+          ) : null}
         </div>
       </div>
     </div>

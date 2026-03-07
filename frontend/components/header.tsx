@@ -23,7 +23,7 @@ export function Header() {
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-900/90">
       <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3 px-4 py-3 md:px-6">
-        <Link href="/markets" className="flex items-center gap-2 text-slate-900 dark:text-slate-100">
+        <Link href="/" className="flex items-center gap-2 text-slate-900 dark:text-slate-100">
           <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-500 text-white">
             <Shield className="h-4 w-4" />
           </span>
