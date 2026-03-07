@@ -190,7 +190,7 @@ export default function CreateMarketPage() {
                   href={shareUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white dark:bg-slate-100 dark:text-slate-900"
+                  className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white dark:bg-slate-800 dark:text-slate-100"
                 >
                   <Share2 className="h-3.5 w-3.5" /> Share on X
                 </a>

@@ -13,7 +13,7 @@
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
   font-family: var(--font-bricolage), sans-serif;
 }
 
@@ -22,11 +22,11 @@ body {
 }
 
 .surface {
-  @apply rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950;
+  @apply rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900;
 }
 
 .surface-muted {
-  @apply rounded-2xl border border-slate-200 bg-slate-100/70 shadow-sm dark:border-slate-800 dark:bg-slate-900/70;
+  @apply rounded-2xl border border-slate-200 bg-slate-100/70 shadow-sm dark:border-slate-800 dark:bg-slate-900/55;
 }
 
 .section-title {
