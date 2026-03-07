@@ -1,24 +1,24 @@
 import type { Metadata } from "next";
-import { Space_Grotesk, Cormorant_Garamond } from "next/font/google";
+import { Bricolage_Grotesque, JetBrains_Mono } from "next/font/google";
 import { AppProviders } from "@/components/providers";
 import { Header } from "@/components/header";
 import "@/styles/globals.css";
 
-const bodyFont = Space_Grotesk({
+const bricolage = Bricolage_Grotesque({
   subsets: ["latin"],
-  variable: "--font-body",
+  variable: "--font-bricolage",
+  weight: ["400", "500", "600", "700"]
+});
+
+const mono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
   weight: ["400", "500", "700"]
 });
 
-const displayFont = Cormorant_Garamond({
-  subsets: ["latin"],
-  variable: "--font-display",
-  weight: ["600", "700"]
-});
-
 export const metadata: Metadata = {
-  title: "ShieldBet",
-  description: "Confidential prediction markets on fhEVM"
+  title: "ShieldBet | Confidential Prediction Markets",
+  description: "Prediction markets with encrypted positions. No front-running. True price discovery."
 };
 
 export default function RootLayout({
@@ -27,15 +27,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${bodyFont.variable} ${displayFont.variable}`}>
+    <html lang="en" suppressHydrationWarning>
+      <body className={`${bricolage.variable} ${mono.variable} min-h-screen`}>
         <AppProviders>
-          <div className="bg-shape bg-shape-top" />
-          <div className="bg-shape bg-shape-bottom" />
-          <main className="page-wrap">
-            <Header />
-            {children}
-          </main>
+          <Header />
+          <main className="mx-auto w-full max-w-7xl px-4 py-6 md:px-6">{children}</main>
         </AppProviders>
       </body>
     </html>

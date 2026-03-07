@@ -5,6 +5,8 @@ export interface MarketMetadataPayload {
   question: string;
   creator: string;
   deadline: bigint;
+  category?: string;
+  resolutionCriteria?: string;
 }
 
 export interface ResolutionPayload {

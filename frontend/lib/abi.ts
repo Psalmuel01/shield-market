@@ -43,6 +43,36 @@ export const shieldBetAbi = [
   },
   {
     type: "function",
+    name: "createMarket",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "question", type: "string" },
+      { name: "deadline", type: "uint256" }
+    ],
+    outputs: [{ name: "marketId", type: "uint256" }]
+  },
+  {
+    type: "function",
+    name: "anchorMarketMetadataCID",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "marketId", type: "uint256" },
+      { name: "cid", type: "string" }
+    ],
+    outputs: []
+  },
+  {
+    type: "function",
+    name: "anchorResolutionCID",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "marketId", type: "uint256" },
+      { name: "cid", type: "string" }
+    ],
+    outputs: []
+  },
+  {
+    type: "function",
     name: "placeBet",
     stateMutability: "payable",
     inputs: [
