@@ -66,13 +66,21 @@ export function MarketsDashboard() {
 
       if (marketRes?.status !== "success" || !marketRes.result) continue;
 
-      const marketTuple = marketRes.result as readonly [string, bigint, number, boolean, bigint, bigint, `0x${string}`];
+      const market = marketRes.result as {
+        question: string;
+        deadline: bigint;
+        outcome: number;
+        resolved: boolean;
+        totalYes: bigint;
+        totalNo: bigint;
+        creator: `0x${string}`;
+      };
       rows.push({
         marketId: ids[i / 3],
-        question: marketTuple[0],
-        deadline: marketTuple[1],
-        outcome: marketTuple[2],
-        resolved: marketTuple[3],
+        question: market.question,
+        deadline: market.deadline,
+        outcome: market.outcome,
+        resolved: market.resolved,
         metadataCid: metadataRes?.status === "success" && metadataRes.result ? String(metadataRes.result) : "",
         resolutionCid: resolutionRes?.status === "success" && resolutionRes.result ? String(resolutionRes.result) : ""
       });

@@ -2,7 +2,7 @@
 
 Confidential prediction markets prototype for PL Genesis 2026.
 
-ShieldBet implements the Project 1 scope from `PL-Genesis-PRD-v2`: a two-surface dApp (Markets dashboard + Bet page) backed by a market smart contract with encrypted-position interfaces, resolution flow, claim logic, and Filecoin/Lit integration seams.
+ShieldBet implements a two-surface dApp (Markets dashboard + Bet page) backed by a market smart contract with encrypted-position interfaces, resolution flow, claim logic, and Filecoin/Lit integration seams.
 
 ## Monorepo Layout
 

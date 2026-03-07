@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import {FHE, ebool, euint8, euint64, externalEuint8, externalEuint64} from "@fhevm/solidity/lib/FHE.sol";
+import {ZamaEthereumConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-type euint64 is uint64;
-type euint8 is uint8;
-type einput is bytes32;
-
-contract ShieldBet is Ownable {
+contract ShieldBet is ZamaEthereumConfig, Ownable {
     struct Market {
         string question;
         uint256 deadline;
@@ -24,15 +22,20 @@ contract ShieldBet is Ownable {
     mapping(uint256 => mapping(address => euint64)) private betAmounts;
     mapping(uint256 => mapping(address => euint8)) private betOutcomes;
     mapping(uint256 => mapping(address => bool)) public hasClaimed;
+    mapping(uint256 => mapping(address => bool)) public hasPosition;
+
+    // Assigned after market resolution by the owner/oracle flow (e.g. Lit Action backend).
+    mapping(uint256 => mapping(address => uint256)) public claimablePayouts;
 
     mapping(uint256 => string) public marketMetadataCID;
     mapping(uint256 => string) public marketResolutionCID;
 
     event MarketCreated(uint256 indexed marketId, string question, uint256 deadline, address indexed creator);
     event MarketMetadataAnchored(uint256 indexed marketId, string cid);
-    event BetPlaced(uint256 indexed marketId, address indexed bettor, bytes32 encOutcome, bytes32 encAmount);
+    event BetPlaced(uint256 indexed marketId, address indexed bettor, bytes32 encOutcomeHandle, bytes32 encAmountHandle);
     event MarketResolved(uint256 indexed marketId, uint8 outcome);
     event MarketResolutionAnchored(uint256 indexed marketId, string cid);
+    event PayoutAssigned(uint256 indexed marketId, address indexed winner, uint256 payoutAmount);
     event WinningsClaimed(uint256 indexed marketId, address indexed winner, uint256 payoutAmount);
 
     error MarketNotFound();
@@ -41,12 +44,10 @@ contract ShieldBet is Ownable {
     error MarketAlreadyResolved();
     error InvalidOutcome();
     error AlreadyHasPosition();
-    error InvalidBetProof();
-    error IncorrectStakeValue();
+    error InvalidBetAmount();
     error MarketNotResolved();
     error AlreadyClaimed();
-    error NoPosition();
-    error NotWinningPosition();
+    error NoClaimablePayout();
     error NotMarketCreator();
 
     constructor() Ownable(msg.sender) {}
@@ -60,10 +61,14 @@ contract ShieldBet is Ownable {
             deadline: deadline,
             outcome: 0,
             resolved: false,
-            totalYes: euint64.wrap(0),
-            totalNo: euint64.wrap(0),
+            totalYes: FHE.asEuint64(0),
+            totalNo: FHE.asEuint64(0),
             creator: msg.sender
         });
+
+        // Contract must retain access to encrypted accumulators across txs.
+        FHE.allowThis(markets[marketId].totalYes);
+        FHE.allowThis(markets[marketId].totalNo);
 
         emit MarketCreated(marketId, question, deadline, msg.sender);
     }
@@ -78,29 +83,41 @@ contract ShieldBet is Ownable {
 
     function placeBet(
         uint256 marketId,
-        einput encOutcome,
-        einput encAmount,
-        bytes calldata proof
+        externalEuint8 encOutcome,
+        externalEuint64 encAmount,
+        bytes calldata inputProof
     ) external payable {
         Market storage market = _requireMarket(marketId);
         if (block.timestamp >= market.deadline) revert MarketExpired();
         if (market.resolved) revert MarketAlreadyResolved();
-        if (euint64.unwrap(betAmounts[marketId][msg.sender]) != 0) revert AlreadyHasPosition();
+        if (hasPosition[marketId][msg.sender]) revert AlreadyHasPosition();
+        if (msg.value == 0) revert InvalidBetAmount();
 
-        (uint8 clearOutcome, uint64 clearAmount) = _decodeAndValidateProof(encOutcome, encAmount, proof);
+        euint8 outcome = FHE.fromExternal(encOutcome, inputProof);
+        euint64 amount = FHE.fromExternal(encAmount, inputProof);
 
-        if (msg.value != clearAmount) revert IncorrectStakeValue();
+        // User and contract can reuse encrypted bet handles.
+        FHE.allowThis(outcome);
+        FHE.allow(outcome, msg.sender);
+        FHE.allowThis(amount);
+        FHE.allow(amount, msg.sender);
 
-        betAmounts[marketId][msg.sender] = euint64.wrap(clearAmount);
-        betOutcomes[marketId][msg.sender] = euint8.wrap(clearOutcome);
+        betOutcomes[marketId][msg.sender] = outcome;
+        betAmounts[marketId][msg.sender] = amount;
+        hasPosition[marketId][msg.sender] = true;
 
-        if (clearOutcome == 1) {
-            market.totalYes = euint64.wrap(euint64.unwrap(market.totalYes) + clearAmount);
-        } else {
-            market.totalNo = euint64.wrap(euint64.unwrap(market.totalNo) + clearAmount);
-        }
+        // Encrypted pool updates without decrypting outcome/amount.
+        ebool isYes = FHE.eq(outcome, FHE.asEuint8(1));
+        euint64 yesDelta = FHE.select(isYes, amount, FHE.asEuint64(0));
+        euint64 noDelta = FHE.select(isYes, FHE.asEuint64(0), amount);
 
-        emit BetPlaced(marketId, msg.sender, einput.unwrap(encOutcome), einput.unwrap(encAmount));
+        market.totalYes = FHE.add(market.totalYes, yesDelta);
+        market.totalNo = FHE.add(market.totalNo, noDelta);
+
+        FHE.allowThis(market.totalYes);
+        FHE.allowThis(market.totalNo);
+
+        emit BetPlaced(marketId, msg.sender, externalEuint8.unwrap(encOutcome), externalEuint64.unwrap(encAmount));
     }
 
     function resolveMarket(uint256 marketId, uint8 outcome) external onlyOwner {
@@ -122,26 +139,24 @@ contract ShieldBet is Ownable {
         emit MarketResolutionAnchored(marketId, cid);
     }
 
+    function assignWinnerPayout(uint256 marketId, address winner, uint256 payoutAmount) external onlyOwner {
+        Market storage market = _requireMarket(marketId);
+        if (!market.resolved) revert MarketNotResolved();
+
+        claimablePayouts[marketId][winner] = payoutAmount;
+        emit PayoutAssigned(marketId, winner, payoutAmount);
+    }
+
     function claimWinnings(uint256 marketId) external {
         Market storage market = _requireMarket(marketId);
         if (!market.resolved) revert MarketNotResolved();
         if (hasClaimed[marketId][msg.sender]) revert AlreadyClaimed();
 
-        uint64 stake = euint64.unwrap(betAmounts[marketId][msg.sender]);
-        if (stake == 0) revert NoPosition();
-
-        uint8 position = euint8.unwrap(betOutcomes[marketId][msg.sender]);
-        if (position != market.outcome) revert NotWinningPosition();
-
-        uint64 winningPool = market.outcome == 1 ? euint64.unwrap(market.totalYes) : euint64.unwrap(market.totalNo);
-        uint64 losingPool = market.outcome == 1 ? euint64.unwrap(market.totalNo) : euint64.unwrap(market.totalYes);
-
-        uint256 payout = stake;
-        if (winningPool > 0 && losingPool > 0) {
-            payout += (uint256(stake) * uint256(losingPool)) / uint256(winningPool);
-        }
+        uint256 payout = claimablePayouts[marketId][msg.sender];
+        if (payout == 0) revert NoClaimablePayout();
 
         hasClaimed[marketId][msg.sender] = true;
+        claimablePayouts[marketId][msg.sender] = 0;
 
         (bool sent, ) = msg.sender.call{value: payout}("");
         require(sent, "ETH transfer failed");
@@ -159,46 +174,17 @@ contract ShieldBet is Ownable {
         return betOutcomes[marketId][msg.sender];
     }
 
-    function getMarketTotals(uint256 marketId) external view onlyOwner returns (uint64 yesTotal, uint64 noTotal) {
+    function getEncryptedMarketTotals(uint256 marketId) external view onlyOwner returns (euint64 yesTotal, euint64 noTotal) {
         Market storage market = _requireMarket(marketId);
-        return (euint64.unwrap(market.totalYes), euint64.unwrap(market.totalNo));
+        return (market.totalYes, market.totalNo);
     }
 
     function getClaimQuote(uint256 marketId, address user) external view returns (uint256 payout, bool eligible) {
         Market storage market = _requireMarket(marketId);
-        if (!market.resolved) return (0, false);
+        if (!market.resolved || hasClaimed[marketId][user]) return (0, false);
 
-        uint64 stake = euint64.unwrap(betAmounts[marketId][user]);
-        if (stake == 0) return (0, false);
-
-        uint8 position = euint8.unwrap(betOutcomes[marketId][user]);
-        if (position != market.outcome || hasClaimed[marketId][user]) return (0, false);
-
-        uint64 winningPool = market.outcome == 1 ? euint64.unwrap(market.totalYes) : euint64.unwrap(market.totalNo);
-        uint64 losingPool = market.outcome == 1 ? euint64.unwrap(market.totalNo) : euint64.unwrap(market.totalYes);
-
-        payout = stake;
-        if (winningPool > 0 && losingPool > 0) {
-            payout += (uint256(stake) * uint256(losingPool)) / uint256(winningPool);
-        }
-
-        return (payout, true);
-    }
-
-    function _decodeAndValidateProof(
-        einput encOutcome,
-        einput encAmount,
-        bytes calldata proof
-    ) internal pure returns (uint8 clearOutcome, uint64 clearAmount) {
-        (clearOutcome, clearAmount) = abi.decode(proof, (uint8, uint64));
-
-        if (clearOutcome != 1 && clearOutcome != 2) revert InvalidOutcome();
-        if (clearAmount == 0) revert InvalidBetProof();
-
-        uint8 decodedOutcome = uint8(uint256(einput.unwrap(encOutcome)) & 0xff);
-        uint64 decodedAmount = uint64(uint256(einput.unwrap(encAmount)));
-
-        if (decodedOutcome != clearOutcome || decodedAmount != clearAmount) revert InvalidBetProof();
+        payout = claimablePayouts[marketId][user];
+        eligible = payout > 0;
     }
 
     function _requireMarket(uint256 marketId) internal view returns (Market storage market) {
