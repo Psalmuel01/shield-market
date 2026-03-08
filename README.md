@@ -119,7 +119,7 @@ Open [http://localhost:3000](http://localhost:3000)
 - `NEXT_PUBLIC_FHEVM_VERIFY_INPUT_CONTRACT`
 - `NEXT_PUBLIC_FHEVM_GATEWAY_CHAIN_ID`
 - `NEXT_PUBLIC_LIT_ACTION_CID` (optional, enables Lit Action execution in claim flow)
-- `NEXT_PUBLIC_LIT_NETWORK` (optional, default: `datil`)
+- `NEXT_PUBLIC_LIT_NETWORK` (optional, default: `naga-test`; supported: `naga-test`, `naga-dev`, `naga-mainnet`, `naga`, `naga-local`, `naga-staging`, `naga-proto`; `datil` is kept as backward-compatible alias to `naga-test`)
 - `FILECOIN_UPLOAD_MODE` (`synapse` or `mock`)
 - `FILECOIN_NETWORK` (`calibration`, `mainnet`, `devnet`)
 - `FILECOIN_RPC_URL` (optional custom RPC URL for selected Filecoin network)

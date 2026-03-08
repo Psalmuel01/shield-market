@@ -35,6 +35,8 @@ export function MarketsDashboard() {
     functionName: "marketCount"
   });
 
+  console.log("Market count:", marketCount?.toString());
+
   const ids = useMemo(() => {
     if (!marketCount) return [] as bigint[];
     return Array.from({ length: Number(marketCount) }, (_, idx) => BigInt(idx + 1));
@@ -68,6 +70,8 @@ export function MarketsDashboard() {
       enabled: contracts.length > 0
     }
   });
+
+  console.log("Market batch:", marketBatch);
 
   const markets = useMemo(() => {
     if (!marketBatch?.length) return [] as ParsedMarket[];
@@ -107,6 +111,8 @@ export function MarketsDashboard() {
 
     return rows;
   }, [ids, marketBatch]);
+
+  console.log("Markets:", markets);
 
   const filtered = useMemo(() => {
     let next = markets;
