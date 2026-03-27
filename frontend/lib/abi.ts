@@ -72,6 +72,16 @@ export const shieldBetAbi = [
   },
   {
     type: "function",
+    name: "claimablePayouts",
+    stateMutability: "view",
+    inputs: [
+      { name: "marketId", type: "uint256" },
+      { name: "account", type: "address" }
+    ],
+    outputs: [{ name: "", type: "uint256" }]
+  },
+  {
+    type: "function",
     name: "createMarket",
     stateMutability: "nonpayable",
     inputs: [
@@ -166,6 +176,35 @@ export const shieldBetAbi = [
       { name: "winnerBetAmount", type: "uint256" },
       { name: "totalWinningSide", type: "uint256" }
     ],
+    outputs: []
+  },
+  {
+    type: "function",
+    name: "computeAndAssignPayouts",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "marketId", type: "uint256" },
+      { name: "winners", type: "address[]" },
+      { name: "winnerBetAmounts", type: "uint256[]" },
+      { name: "totalWinningSide", type: "uint256" }
+    ],
+    outputs: []
+  },
+  {
+    type: "function",
+    name: "openSettlementData",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "marketId", type: "uint256" },
+      { name: "bettors", type: "address[]" }
+    ],
+    outputs: []
+  },
+  {
+    type: "function",
+    name: "withdrawAccruedFees",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "recipient", type: "address" }],
     outputs: []
   },
   {

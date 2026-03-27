@@ -1,16 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useAccount, useReadContract, useReadContracts } from "wagmi";
+import { getAddress } from "viem";
+import { useAccount, useReadContract, useReadContracts, useWalletClient } from "wagmi";
 import { MyBetRow, MyBetsTable } from "@/components/my-bets-table";
 import { shieldBetConfig } from "@/lib/contract";
+import { decryptUserHandles } from "@/lib/encryption";
 import { decodeMarketView } from "@/lib/market-contract";
 import { getLocalBetsByWallet, LocalBetRecord } from "@/lib/local-bets";
 import { logInfo, logWarn } from "@/lib/telemetry";
 
 export default function MyBetsPage() {
   const { address } = useAccount();
+  const normalizedAddress = address ? getAddress(address) : null;
+  const { data: walletClient } = useWalletClient();
   const [localBets, setLocalBets] = useState<LocalBetRecord[]>([]);
+  const [decryptedPositions, setDecryptedPositions] = useState<Record<string, "YES" | "NO">>({});
 
   useEffect(() => {
     setLocalBets(getLocalBetsByWallet(address));
@@ -58,6 +63,11 @@ export default function MyBetsPage() {
         ...shieldBetConfig,
         functionName: "getClaimQuote" as const,
         args: [marketId, address] as const
+      },
+      {
+        ...shieldBetConfig,
+        functionName: "getMyOutcome" as const,
+        args: [marketId] as const
       }
     ]);
   }, [address, ids]);
@@ -80,17 +90,75 @@ export default function MyBetsPage() {
     });
   }, [batch]);
 
+  useEffect(() => {
+    if (!normalizedAddress || !walletClient || !batch?.length) return;
+    const userAddress = normalizedAddress;
+    const signer = walletClient;
+    const batchResults = batch;
+
+    let cancelled = false;
+    async function loadPositions() {
+      const contractsToDecrypt: { marketId: bigint; handle: `0x${string}` }[] = [];
+
+      for (let i = 0; i < batchResults.length; i += 4) {
+        const hasPositionRes = batchResults[i + 1];
+        const outcomeRes = batchResults[i + 3];
+        const marketId = ids[i / 4];
+
+        if (hasPositionRes?.status !== "success" || !hasPositionRes.result) continue;
+        if (outcomeRes?.status !== "success" || !outcomeRes.result) continue;
+
+        contractsToDecrypt.push({
+          marketId,
+          handle: outcomeRes.result as `0x${string}`
+        });
+      }
+
+      if (!contractsToDecrypt.length) return;
+
+      try {
+        const decrypted = await decryptUserHandles({
+          contractAddress: shieldBetConfig.address,
+          userAddress,
+          walletClient: signer,
+          handles: contractsToDecrypt.map((entry) => entry.handle)
+        });
+        if (cancelled) return;
+
+        const next: Record<string, "YES" | "NO"> = {};
+        for (const entry of contractsToDecrypt) {
+          const clear = Number(decrypted[entry.handle]);
+          if (clear === 1) next[entry.marketId.toString()] = "YES";
+          if (clear === 2) next[entry.marketId.toString()] = "NO";
+        }
+        setDecryptedPositions(next);
+      } catch (error) {
+        if (!cancelled) {
+          logWarn("my-bets", "failed to decrypt positions", {
+            account: userAddress,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }
+    }
+
+    void loadPositions();
+    return () => {
+      cancelled = true;
+    };
+  }, [batch, ids, normalizedAddress, walletClient]);
+
   const rows = useMemo(() => {
     if (!batch?.length || !address) return [] as MyBetRow[];
 
     const localByMarket = new Map(localBets.map((bet) => [bet.marketId, bet]));
 
     const next: MyBetRow[] = [];
-    for (let i = 0; i < batch.length; i += 3) {
+    for (let i = 0; i < batch.length; i += 4) {
       const marketRes = batch[i];
       const hasPositionRes = batch[i + 1];
       const claimRes = batch[i + 2];
-      const marketId = ids[i / 3];
+      const marketId = ids[i / 4];
 
       if (
         marketRes?.status !== "success" ||
@@ -120,6 +188,7 @@ export default function MyBetsPage() {
 
       const claimResult = claimRes.result as readonly [bigint, boolean];
       const local = localByMarket.get(marketId.toString());
+      const decryptedPosition = decryptedPositions[marketId.toString()];
 
       const canClaim = Boolean(claimResult[1]);
       const status = market.resolved ? (canClaim ? "Resolved" : "Claimed") : "Open";
@@ -127,14 +196,14 @@ export default function MyBetsPage() {
       next.push({
         marketId,
         question: market.question,
-        position: local?.position || "Encrypted",
+        position: decryptedPosition || local?.position || "Encrypted",
         status,
         canClaim
       });
     }
 
     return next;
-  }, [address, batch, ids, localBets]);
+  }, [address, batch, decryptedPositions, ids, localBets]);
 
   useEffect(() => {
     logInfo("my-bets", "parsed rows", {
@@ -157,7 +226,7 @@ export default function MyBetsPage() {
           Portfolio view of your confidential positions. Bet sizes remain encrypted until claim.
         </p>
         <p className="mt-2 max-w-2xl text-xs text-slate-500 dark:text-slate-400">
-          Position side is shown when this browser has a local record of your bet; otherwise it remains encrypted.
+          Position side is recovered from your encrypted on-chain handles when wallet signing is available; otherwise it falls back to this browser&apos;s local record.
         </p>
       </div>
 

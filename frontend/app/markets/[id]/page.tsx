@@ -4,14 +4,15 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { Clock3, ExternalLink, EyeOff, FileText, Wallet } from "lucide-react";
-import { formatEther, getAddress, isAddress, parseEther } from "viem";
-import { useAccount, useBalance, usePublicClient, useReadContract, useWaitForTransactionReceipt, useWalletClient, useWriteContract } from "wagmi";
+import { formatEther, getAddress, parseAbiItem, parseEther } from "viem";
+import { useAccount, useBalance, usePublicClient, useReadContract, useReadContracts, useWaitForTransactionReceipt, useWalletClient, useWriteContract } from "wagmi";
 import { BetPlacement } from "@/components/bet-placement";
 import { ClaimConfirmation, ClaimFlow } from "@/components/claim-flow";
 import { EncryptedActivity } from "@/components/encrypted-activity";
 import { EncryptedBands } from "@/components/encrypted-bands";
 import { RuntimeAlerts } from "@/components/runtime-alerts";
-import { BetOutcome, encryptBetInputs } from "@/lib/encryption";
+import { SettlementPlanPanel, type SettlementPlanView } from "@/components/settlement-plan";
+import { BetOutcome, decryptUserHandles, encryptBetInputs } from "@/lib/encryption";
 import { cidToExplorer, formatDeadline, getCountdown } from "@/lib/format";
 import { shieldBetConfig } from "@/lib/contract";
 import { decodeMarketDetails, decodeMarketView } from "@/lib/market-contract";
@@ -34,15 +35,17 @@ export default function MarketBetPage() {
   const [claimOpen, setClaimOpen] = useState(false);
 
   const [adminResolveOutcome, setAdminResolveOutcome] = useState<BetOutcome>(1);
-  const [adminWinner, setAdminWinner] = useState("");
-  const [adminWinnerStake, setAdminWinnerStake] = useState("0.0");
-  const [adminWinningSideTotal, setAdminWinningSideTotal] = useState("0.0");
   const [adminMessage, setAdminMessage] = useState<string | null>(null);
   const [betFlowStage, setBetFlowStage] = useState<"idle" | "encrypting" | "wallet" | "confirming">("idle");
+  const [positionDecrypting, setPositionDecrypting] = useState(false);
+  const [positionAmountWei, setPositionAmountWei] = useState<bigint | null>(null);
+  const [settlementPlan, setSettlementPlan] = useState<SettlementPlanView | null>(null);
+  const [settlementLoading, setSettlementLoading] = useState<"idle" | "opening" | "loading-plan" | "assigning">("idle");
 
   const [localPosition, setLocalPosition] = useState<"YES" | "NO" | "Encrypted">("Encrypted");
 
   const { address, chainId } = useAccount();
+  const normalizedAddress = address ? getAddress(address) : null;
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
   const { data: balance } = useBalance({ address });
@@ -123,6 +126,26 @@ export default function MarketBetPage() {
     }
   });
 
+  const { data: encryptedPositionHandles } = useReadContracts({
+    contracts: address && hasPosition
+      ? [
+          {
+            ...shieldBetConfig,
+            functionName: "getMyBet" as const,
+            args: [marketId] as const
+          },
+          {
+            ...shieldBetConfig,
+            functionName: "getMyOutcome" as const,
+            args: [marketId] as const
+          }
+        ]
+      : [],
+    query: {
+      enabled: Boolean(address && hasPosition && walletClient)
+    }
+  });
+
   useEffect(() => {
     logInfo("market-detail", "read market core", {
       marketId: marketId.toString(),
@@ -161,11 +184,80 @@ export default function MarketBetPage() {
     const bet = getLocalBet(marketId, address);
     if (!bet) {
       setLocalPosition("Encrypted");
+      setPositionAmountWei(null);
       return;
     }
 
     setLocalPosition(bet.position);
+    try {
+      setPositionAmountWei(BigInt(bet.amountWei));
+    } catch {
+      setPositionAmountWei(null);
+    }
   }, [marketId, address, hash]);
+
+  useEffect(() => {
+    const betHandle = encryptedPositionHandles?.[0];
+    const outcomeHandle = encryptedPositionHandles?.[1];
+
+    if (
+      !normalizedAddress ||
+      !walletClient ||
+      !hasPosition ||
+      betHandle?.status !== "success" ||
+      outcomeHandle?.status !== "success" ||
+      !betHandle.result ||
+      !outcomeHandle.result
+    ) {
+      return;
+    }
+    const userAddress = normalizedAddress;
+    const signer = walletClient;
+    const betHandleValue = betHandle.result as `0x${string}`;
+    const outcomeHandleValue = outcomeHandle.result as `0x${string}`;
+
+    let cancelled = false;
+    async function loadPosition() {
+      try {
+        setPositionDecrypting(true);
+        const decrypted = await decryptUserHandles({
+          contractAddress: shieldBetConfig.address,
+          userAddress,
+          walletClient: signer,
+          handles: [betHandleValue, outcomeHandleValue]
+        });
+        if (cancelled) return;
+
+        const amountValue = decrypted[betHandleValue];
+        const outcomeValue = Number(decrypted[outcomeHandleValue]);
+        if (amountValue !== undefined) {
+          setPositionAmountWei(BigInt(amountValue as bigint | number | string));
+        }
+        if (outcomeValue === 1) {
+          setLocalPosition("YES");
+        } else if (outcomeValue === 2) {
+          setLocalPosition("NO");
+        }
+      } catch (error) {
+        if (!cancelled) {
+          logWarn("market-detail", "failed to decrypt user position", {
+            marketId: marketId.toString(),
+          account: normalizedAddress,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setPositionDecrypting(false);
+        }
+      }
+    }
+
+    void loadPosition();
+    return () => {
+      cancelled = true;
+    };
+  }, [encryptedPositionHandles, hasPosition, marketId, normalizedAddress, walletClient]);
 
   if (!marketParam) {
     return <p className="subtle">Loading market...</p>;
@@ -213,6 +305,7 @@ export default function MarketBetPage() {
     knownPosition && resolved
       ? (localPosition === "YES" && outcome === 1) || (localPosition === "NO" && outcome === 2)
       : null;
+  const positionAmountLabel = positionAmountWei !== null ? `${Number(formatEther(positionAmountWei)).toFixed(4)} ETH` : null;
   const marketStatusClass =
     marketStatus === "Resolved"
       ? "bg-slate-100 text-slate-700 dark:bg-slate-900 dark:text-slate-300"
@@ -221,21 +314,6 @@ export default function MarketBetPage() {
         : marketStatus === "Closing Soon"
           ? "bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300"
           : "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300";
-  const projectedPayoutWei =
-    adminWinnerStake && adminWinningSideTotal && Number(adminWinningSideTotal) > 0
-      ? (() => {
-          try {
-            const winnerStakeWei = parseEther(adminWinnerStake || "0");
-            const winningSideTotalWei = parseEther(adminWinningSideTotal || "0");
-            if (winningSideTotalWei === 0n || winnerStakeWei > winningSideTotalWei) return null;
-            const distributablePoolWei = totalPoolWei - ((totalPoolWei * feeBps) / 10_000n);
-            return (winnerStakeWei * distributablePoolWei) / winningSideTotalWei;
-          } catch {
-            return null;
-          }
-        })()
-      : null;
-
   function getErrorMessage(error: unknown): string {
     if (error instanceof Error) {
       const maybe = error as Error & {
@@ -256,11 +334,52 @@ export default function MarketBetPage() {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
   }
 
+  async function getGasOverrides(
+    functionName: "placeBet" | "resolveMarket" | "computeAndAssignPayouts" | "openSettlementData" | "claimWinnings",
+    args: readonly unknown[],
+    value?: bigint
+  ) {
+    if (!publicClient || chainId !== expectedChainId || shieldBetConfig.address === "0x0000000000000000000000000000000000000000") {
+      return {};
+    }
+
+    try {
+      const [estimatedGas, latestBlock] = await Promise.all([
+        publicClient.estimateContractGas({
+          address: shieldBetConfig.address,
+          abi: shieldBetConfig.abi,
+          functionName: functionName as never,
+          args: args as never,
+          account: normalizedAddress || undefined,
+          value
+        }),
+        publicClient.getBlock({ blockTag: "latest" })
+      ]);
+
+      const networkCap = (latestBlock.gasLimit * 90n) / 100n;
+      const paddedEstimate = (estimatedGas * 12n) / 10n;
+      const gas = paddedEstimate > networkCap ? networkCap : paddedEstimate;
+      return gas > 0n ? { gas } : {};
+    } catch (error) {
+      logWarn("market-detail", "gas estimation failed, proceeding without manual cap", {
+        functionName,
+        marketId: marketId.toString(),
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return {};
+    }
+  }
+
   async function placeBet() {
     if (!address) {
       setStatusMessage("Connect your wallet first.");
       return;
     }
+    if (!normalizedAddress) {
+      setStatusMessage("Wallet address is not ready yet. Try again.");
+      return;
+    }
+    const userAddress = normalizedAddress;
     if (hasBlockingDiagnostics) {
       setStatusMessage("Resolve the configuration errors shown above before placing a bet.");
       return;
@@ -287,7 +406,7 @@ export default function MarketBetPage() {
       await flushUi();
       const encrypted = await encryptBetInputs(selectedOutcome, amountWei, {
         contractAddress: shieldBetConfig.address,
-        userAddress: getAddress(address)
+        userAddress
       });
       logInfo("market-detail", "placeBet encrypted payload", {
         marketId: marketId.toString(),
@@ -299,11 +418,17 @@ export default function MarketBetPage() {
       setBetFlowStage("wallet");
       setStatusMessage("Encrypted payload ready. Confirm the transaction in your wallet.");
       await flushUi();
+      const gasOverrides = await getGasOverrides(
+        "placeBet",
+        [marketId, encrypted.encOutcome, encrypted.encAmount, encrypted.inputProof] as const,
+        amountWei
+      );
       const txHash = await writeContractAsync({
         ...shieldBetConfig,
         functionName: "placeBet",
         args: [marketId, encrypted.encOutcome, encrypted.encAmount, encrypted.inputProof],
-        value: amountWei
+        value: amountWei,
+        ...gasOverrides
       });
       setBetFlowStage("confirming");
       setStatusMessage("Transaction submitted. Waiting for on-chain confirmation...");
@@ -319,7 +444,7 @@ export default function MarketBetPage() {
 
       saveLocalBet({
         marketId: marketId.toString(),
-        wallet: getAddress(address),
+        wallet: userAddress,
         position: selectedOutcome === 1 ? "YES" : "NO",
         amountWei: amountWei.toString(),
         createdAt: Date.now()
@@ -339,7 +464,7 @@ export default function MarketBetPage() {
   async function executeClaim(): Promise<ClaimConfirmation> {
     if (!address) throw new Error("Connect wallet first");
     if (chainId !== expectedChainId) throw new Error(`Wrong network. Switch wallet to chain ID ${expectedChainId}.`);
-    const normalizedAccount = getAddress(address);
+    const normalizedAccount = normalizedAddress || getAddress(address);
 
     let litExecution:
       | {
@@ -404,10 +529,12 @@ export default function MarketBetPage() {
       marketId: marketId.toString(),
       account: normalizedAccount
     });
+    const claimGasOverrides = await getGasOverrides("claimWinnings", [marketId] as const);
     const txHash = await writeContractAsync({
       ...shieldBetConfig,
       functionName: "claimWinnings",
-      args: [marketId]
+      args: [marketId],
+      ...claimGasOverrides
     });
     logInfo("market-detail", "claim tx submitted", { txHash });
 
@@ -475,10 +602,12 @@ export default function MarketBetPage() {
         marketId: marketId.toString(),
         outcome: adminResolveOutcome
       });
+      const gasOverrides = await getGasOverrides("resolveMarket", [marketId, adminResolveOutcome] as const);
       const resolveHash = await writeContractAsync({
         ...shieldBetConfig,
         functionName: "resolveMarket",
-        args: [marketId, adminResolveOutcome]
+        args: [marketId, adminResolveOutcome],
+        ...gasOverrides
       });
       logInfo("market-detail", "resolve tx submitted", { resolveHash });
 
@@ -499,9 +628,68 @@ export default function MarketBetPage() {
     }
   }
 
-  async function assignPayout() {
-    if (!isAddress(adminWinner)) {
-      setAdminMessage("Winner address is invalid.");
+  async function openSettlementData() {
+    try {
+      if (chainId !== expectedChainId) {
+        throw new Error(`Wrong network. Switch wallet to chain ID ${expectedChainId}.`);
+      }
+      setSettlementLoading("opening");
+      setAdminMessage(null);
+      const logs = await publicClient?.getLogs({
+        address: shieldBetConfig.address,
+        event: parseAbiItem(
+          "event BetPlaced(uint256 indexed marketId, address indexed bettor, bytes32 encOutcomeHandle, bytes32 encAmountHandle)"
+        ),
+        args: { marketId },
+        fromBlock: 0n,
+        toBlock: "latest"
+      });
+      const bettors = Array.from(
+        new Set((logs || []).map((log) => getAddress(String(log.args.bettor))))
+      );
+      if (!bettors.length) {
+        throw new Error("No placed bets were found for this market.");
+      }
+      const gasOverrides = await getGasOverrides("openSettlementData", [marketId, bettors] as const);
+      const openHash = await writeContractAsync({
+        ...shieldBetConfig,
+        functionName: "openSettlementData",
+        args: [marketId, bettors],
+        ...gasOverrides
+      });
+      await publicClient?.waitForTransactionReceipt({ hash: openHash });
+      setAdminMessage("Settlement data opened for post-resolution decryption.");
+    } catch (error) {
+      logError("market-detail", "open settlement data failed", error);
+      setAdminMessage(error instanceof Error ? error.message : "Failed to open settlement data");
+    } finally {
+      setSettlementLoading("idle");
+    }
+  }
+
+  async function loadSettlementPlan() {
+    try {
+      setSettlementLoading("loading-plan");
+      setAdminMessage(null);
+      const response = await fetch(`/api/markets/${marketId.toString()}/settlement`, { cache: "no-store" });
+      const body = (await response.json()) as SettlementPlanView & { error?: string };
+      if (!response.ok) {
+        throw new Error(body.error || "Unable to generate settlement plan");
+      }
+      setSettlementPlan(body);
+      setAdminMessage("Settlement plan generated from decrypted resolved bets.");
+    } catch (error) {
+      logError("market-detail", "load settlement plan failed", error);
+      setSettlementPlan(null);
+      setAdminMessage(error instanceof Error ? error.message : "Failed to load settlement plan");
+    } finally {
+      setSettlementLoading("idle");
+    }
+  }
+
+  async function assignPayoutsFromPlan() {
+    if (!settlementPlan) {
+      setAdminMessage("Generate a settlement plan first.");
       return;
     }
 
@@ -509,32 +697,36 @@ export default function MarketBetPage() {
       if (chainId !== expectedChainId) {
         throw new Error(`Wrong network. Switch wallet to chain ID ${expectedChainId}.`);
       }
+      setSettlementLoading("assigning");
       setAdminMessage(null);
-      const winnerStakeWei = parseEther(adminWinnerStake || "0");
-      const totalWinningSideWei = parseEther(adminWinningSideTotal || "0");
-      if (winnerStakeWei <= 0n || totalWinningSideWei <= 0n || winnerStakeWei > totalWinningSideWei) {
-        throw new Error("Winner stake and total winning side must be valid positive ETH amounts.");
+      const winners = settlementPlan.participants.filter(
+        (participant) => participant.isWinner && !participant.hasClaimed
+      );
+      if (!winners.length) {
+        throw new Error("No unclaimed winners are available in the current settlement plan.");
       }
-      logInfo("market-detail", "compute payout submit tx", {
-        marketId: marketId.toString(),
-        winner: getAddress(adminWinner),
-        winnerStakeWei: winnerStakeWei.toString(),
-        totalWinningSideWei: totalWinningSideWei.toString()
-      });
+      const winnerAddresses = winners.map((participant) => getAddress(participant.bettor));
+      const winnerAmounts = winners.map((participant) => BigInt(participant.amountWei));
+      const totalWinningSideWei = BigInt(settlementPlan.totalWinningSideWei);
+      const gasOverrides = await getGasOverrides(
+        "computeAndAssignPayouts",
+        [marketId, winnerAddresses, winnerAmounts, totalWinningSideWei] as const
+      );
 
-      await writeContractAsync({
+      const payoutHash = await writeContractAsync({
         ...shieldBetConfig,
-        functionName: "computeAndAssignPayout",
-        args: [marketId, getAddress(adminWinner), winnerStakeWei, totalWinningSideWei]
+        functionName: "computeAndAssignPayouts",
+        args: [marketId, winnerAddresses, winnerAmounts, totalWinningSideWei],
+        ...gasOverrides
       });
-      logInfo("market-detail", "compute payout tx submitted", {
-        marketId: marketId.toString()
-      });
-      setAdminMessage("Deterministic payout computation submitted.");
+      await publicClient?.waitForTransactionReceipt({ hash: payoutHash });
+      setAdminMessage("Winner payouts assigned from the settlement plan.");
+      await loadSettlementPlan();
     } catch (error) {
-      logError("market-detail", "compute payout failed", error);
-      const message = error instanceof Error ? error.message : "Failed to compute payout";
-      setAdminMessage(message);
+      logError("market-detail", "assign payout batch failed", error);
+      setAdminMessage(error instanceof Error ? error.message : "Failed to assign payouts");
+    } finally {
+      setSettlementLoading("idle");
     }
   }
 
@@ -655,6 +847,8 @@ export default function MarketBetPage() {
                   ? "You have a claim quote available. Open the claim flow to verify and withdraw your winnings."
                   : userOutcomeMatches === false
                     ? "Your recorded side did not match the resolved outcome for this market."
+                    : userOutcomeMatches === true
+                      ? "Your recorded side matched the resolved outcome. Claim becomes available once the payout is assigned."
                   : alreadyBet
                     ? "Your wallet has a position here. Claim becomes available after the owner assigns your payout."
                     : "This market has been resolved. Claims are only available to wallets with assigned winnings."}
@@ -708,42 +902,36 @@ export default function MarketBetPage() {
                 </>
               ) : (
                 <>
-                  <label className="text-sm font-medium">Winner Address</label>
-                  <input
-                    value={adminWinner}
-                    onChange={(event) => setAdminWinner(event.target.value)}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-indigo-500/40 focus:ring-2 dark:border-slate-700 dark:bg-slate-900"
-                    placeholder="0x..."
-                  />
-                  <label className="text-sm font-medium">Winner stake (ETH)</label>
-                  <input
-                    value={adminWinnerStake}
-                    onChange={(event) => setAdminWinnerStake(event.target.value)}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-indigo-500/40 focus:ring-2 dark:border-slate-700 dark:bg-slate-900"
-                    placeholder="0.0"
-                  />
-                  <label className="text-sm font-medium">Total winning side (ETH)</label>
-                  <input
-                    value={adminWinningSideTotal}
-                    onChange={(event) => setAdminWinningSideTotal(event.target.value)}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-indigo-500/40 focus:ring-2 dark:border-slate-700 dark:bg-slate-900"
-                    placeholder="0.0"
-                  />
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Payout formula: winner stake / total winning side × distributable pool
+                    Post-resolution flow: open settlement data, generate the payout plan from decrypted resolved bets, then assign winners in batch.
                   </p>
-                  {projectedPayoutWei !== null ? (
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Projected payout: {Number(formatEther(projectedPayoutWei)).toFixed(4)} ETH
-                    </p>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={assignPayout}
-                    className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-white"
-                  >
-                    Compute and assign payout
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={openSettlementData}
+                      disabled={settlementLoading !== "idle"}
+                      className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {settlementLoading === "opening" ? "Opening settlement data..." : "Open settlement data"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={loadSettlementPlan}
+                      disabled={settlementLoading !== "idle"}
+                      className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+                    >
+                      {settlementLoading === "loading-plan" ? "Generating plan..." : "Generate payout plan"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={assignPayoutsFromPlan}
+                      disabled={!settlementPlan || settlementLoading !== "idle"}
+                      className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {settlementLoading === "assigning" ? "Assigning payouts..." : "Assign winners in batch"}
+                    </button>
+                  </div>
+                  {settlementPlan ? <SettlementPlanPanel plan={settlementPlan} /> : null}
                 </>
               )}
               {adminMessage && <p className="text-sm text-slate-600 dark:text-slate-300">{adminMessage}</p>}
@@ -800,6 +988,7 @@ export default function MarketBetPage() {
                     ? `This wallet is locked into ${localPosition}.`
                     : "This wallet has an encrypted position on-chain. The side is not available in this browser session yet."}
                 </p>
+                {positionDecrypting ? <p className="text-xs text-slate-500 dark:text-slate-400">Decrypting your position from Zama fhEVM...</p> : null}
                 {knownPosition ? (
                   <p>
                     Outcome: <span className="font-semibold">{localPosition}</span>
@@ -810,9 +999,13 @@ export default function MarketBetPage() {
                     Result: <span className={`font-semibold ${userOutcomeMatches ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>{userOutcomeMatches ? "Won" : "Lost"}</span>
                   </p>
                 ) : null}
-                <p className="flex items-center gap-2">
-                  Amount: <EyeOff className="h-4 w-4 text-indigo-500" /> ●●●●●● (encrypted)
-                </p>
+                {positionAmountLabel ? (
+                  <p>Stake: <span className="font-semibold">{positionAmountLabel}</span></p>
+                ) : (
+                  <p className="flex items-center gap-2">
+                    Amount: <EyeOff className="h-4 w-4 text-indigo-500" /> ●●●●●● (encrypted)
+                  </p>
+                )}
                 <button
                   type="button"
                   disabled={!resolved || !eligibleToClaim}

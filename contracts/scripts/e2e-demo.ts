@@ -22,7 +22,7 @@ async function main() {
   const alice = ethers.Wallet.createRandom().connect(provider);
   const bob = ethers.Wallet.createRandom().connect(provider);
 
-  const fundingAmount = parseEther("0.01");
+  const fundingAmount = parseEther("0.0004");
   console.log("Funding ephemeral bettors...");
   await (await owner.sendTransaction({ to: alice.address, value: fundingAmount })).wait();
   await (await owner.sendTransaction({ to: bob.address, value: fundingAmount })).wait();
@@ -76,28 +76,30 @@ async function main() {
     return input.encrypt();
   }
 
-  const aliceAmount = parseEther("0.001");
-  const bobAmount = parseEther("0.002");
+  const aliceAmount = parseEther("0.0001");
+  const bobAmount = parseEther("0.0002");
 
   console.log("Placing encrypted YES bet from alice...");
   const aliceEncrypted = await encryptBet(alice.address, 1, aliceAmount);
-  await (
-    await shieldBet
-      .connect(alice)
-      .placeBet(marketId, aliceEncrypted.handles[0], aliceEncrypted.handles[1], aliceEncrypted.inputProof, {
-        value: aliceAmount
-      })
-  ).wait();
+  const alicePlaceBetTx = await shieldBet.placeBet.populateTransaction(
+    marketId,
+    aliceEncrypted.handles[0],
+    aliceEncrypted.handles[1],
+    aliceEncrypted.inputProof,
+    { value: aliceAmount }
+  );
+  await (await alice.sendTransaction({ ...alicePlaceBetTx, to: contractAddress, value: aliceAmount })).wait();
 
   console.log("Placing encrypted NO bet from bob...");
   const bobEncrypted = await encryptBet(bob.address, 2, bobAmount);
-  await (
-    await shieldBet
-      .connect(bob)
-      .placeBet(marketId, bobEncrypted.handles[0], bobEncrypted.handles[1], bobEncrypted.inputProof, {
-        value: bobAmount
-      })
-  ).wait();
+  const bobPlaceBetTx = await shieldBet.placeBet.populateTransaction(
+    marketId,
+    bobEncrypted.handles[0],
+    bobEncrypted.handles[1],
+    bobEncrypted.inputProof,
+    { value: bobAmount }
+  );
+  await (await bob.sendTransaction({ ...bobPlaceBetTx, to: contractAddress, value: bobAmount })).wait();
 
   console.log("Waiting for market close...");
   while (true) {

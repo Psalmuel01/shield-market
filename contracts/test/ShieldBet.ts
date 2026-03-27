@@ -232,4 +232,52 @@ describe("ShieldBet", function () {
     const quote = await shieldBet.getClaimQuote(1, alice.address);
     expect(quote[0]).to.equal(expectedPayout);
   });
+
+  it("batch assigns winning payouts and protects fee withdrawal", async function () {
+    const { shieldBet, owner, alice, bob } = await deployFixture();
+    const shieldBetAddress = await shieldBet.getAddress();
+    const deadline = BigInt((await ethers.provider.getBlock("latest"))!.timestamp + 3600);
+
+    await shieldBet.connect(owner).createMarket("Batch payout test", deadline);
+
+    const aliceAmount = 1_000_000_000_000_000_000n;
+    const bobAmount = 2_000_000_000_000_000_000n;
+
+    const aliceBet = await encryptBet(shieldBetAddress, alice.address, 1, aliceAmount);
+    await shieldBet.connect(alice).placeBet(1, aliceBet.encOutcome, aliceBet.encAmount, aliceBet.inputProof, {
+      value: aliceAmount
+    });
+
+    const bobBet = await encryptBet(shieldBetAddress, bob.address, 1, bobAmount);
+    await shieldBet.connect(bob).placeBet(1, bobBet.encOutcome, bobBet.encAmount, bobBet.inputProof, {
+      value: bobAmount
+    });
+
+    await shieldBet.connect(owner).setMarketFeeBasisPoints(1, 100);
+    await advancePastDeadline(deadline);
+    await shieldBet.connect(owner).resolveMarket(1, 1);
+
+    const totalWinningSide = aliceAmount + bobAmount;
+    await shieldBet
+      .connect(owner)
+      .computeAndAssignPayouts(1, [alice.address, bob.address], [aliceAmount, bobAmount], totalWinningSide);
+
+    const pool = aliceAmount + bobAmount;
+    const fee = (pool * 100n) / 10_000n;
+    const distributable = pool - fee;
+
+    expect(await shieldBet.claimablePayouts(1, alice.address)).to.equal((aliceAmount * distributable) / totalWinningSide);
+    expect(await shieldBet.claimablePayouts(1, bob.address)).to.equal((bobAmount * distributable) / totalWinningSide);
+    expect(await shieldBet.reservedPayoutBalance(1)).to.equal(distributable);
+
+    await expect(shieldBet.connect(owner).withdrawAccruedFees(owner.address)).to.changeEtherBalances(
+      [owner, shieldBet],
+      [fee, -fee]
+    );
+
+    await expect(shieldBet.connect(owner).withdrawAccruedFees(owner.address)).to.be.revertedWithCustomError(
+      shieldBet,
+      "NothingToWithdraw"
+    );
+  });
 });

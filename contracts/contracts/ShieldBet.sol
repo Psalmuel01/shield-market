@@ -30,12 +30,14 @@ contract ShieldBet is ZamaEthereumConfig, Ownable {
     mapping(uint256 => mapping(address => euint8)) private betOutcomes;
     mapping(uint256 => mapping(address => bool)) public hasClaimed;
     mapping(uint256 => mapping(address => bool)) public hasPosition;
+    mapping(uint256 => mapping(address => bool)) public settlementDataOpened;
     mapping(uint256 => uint256) public totalPool;
     mapping(uint256 => uint256) public marketPoolBalance;
     mapping(uint256 => uint256) public reservedPayoutBalance;
     mapping(uint256 => uint256) public feeBasisPoints;
     mapping(uint256 => uint256) public marketFeeAmount;
     mapping(uint256 => bool) public payoutModelInitialized;
+    mapping(uint256 => bool) public marketTotalsOpened;
     uint256 public accruedFees;
 
     // Assigned after market resolution by the owner/oracle flow (e.g. Lit Action backend).
@@ -49,8 +51,11 @@ contract ShieldBet is ZamaEthereumConfig, Ownable {
     event BetPlaced(uint256 indexed marketId, address indexed bettor, bytes32 encOutcomeHandle, bytes32 encAmountHandle);
     event MarketResolved(uint256 indexed marketId, uint8 outcome);
     event MarketResolutionAnchored(uint256 indexed marketId, string cid);
+    event SettlementDataOpened(uint256 indexed marketId, address indexed bettor);
+    event MarketTotalsOpened(uint256 indexed marketId);
     event PayoutAssigned(uint256 indexed marketId, address indexed winner, uint256 payoutAmount);
     event WinningsClaimed(uint256 indexed marketId, address indexed winner, uint256 payoutAmount);
+    event FeesWithdrawn(address indexed recipient, uint256 amount);
 
     error MarketNotFound();
     error DeadlineMustBeFuture();
@@ -68,6 +73,8 @@ contract ShieldBet is ZamaEthereumConfig, Ownable {
     error InvalidWinningTotals();
     error FeeTooHigh();
     error PayoutExceedsBalance();
+    error InvalidAddressArray();
+    error NothingToWithdraw();
 
     constructor() Ownable(msg.sender) {}
 
@@ -208,36 +215,58 @@ contract ShieldBet is ZamaEthereumConfig, Ownable {
         uint256 winnerBetAmount,
         uint256 totalWinningSide
     ) external onlyOwner {
+        _computeAndAssignPayout(marketId, winner, winnerBetAmount, totalWinningSide);
+    }
+
+    function computeAndAssignPayouts(
+        uint256 marketId,
+        address[] calldata winners,
+        uint256[] calldata winnerBetAmounts,
+        uint256 totalWinningSide
+    ) external onlyOwner {
+        uint256 length = winners.length;
+        if (length == 0 || length != winnerBetAmounts.length) revert InvalidAddressArray();
+
+        for (uint256 i = 0; i < length; ++i) {
+            _computeAndAssignPayout(marketId, winners[i], winnerBetAmounts[i], totalWinningSide);
+        }
+    }
+
+    function openSettlementData(uint256 marketId, address[] calldata bettors) external onlyOwner {
         Market storage market = _requireMarket(marketId);
         if (!market.resolved) revert MarketNotResolved();
-        if (hasClaimed[marketId][winner]) revert AlreadyClaimed();
-        if (winnerBetAmount == 0 || totalWinningSide == 0 || winnerBetAmount > totalWinningSide) revert InvalidWinningTotals();
+        if (bettors.length == 0) revert InvalidAddressArray();
 
-        uint256 pool = totalPool[marketId];
-        uint256 fee = marketFeeAmount[marketId];
-        if (!payoutModelInitialized[marketId]) {
-            fee = (pool * feeBasisPoints[marketId]) / 10_000;
-            marketFeeAmount[marketId] = fee;
-            payoutModelInitialized[marketId] = true;
-            accruedFees += fee;
+        if (!marketTotalsOpened[marketId]) {
+            market.totalYes = FHE.makePubliclyDecryptable(market.totalYes);
+            market.totalNo = FHE.makePubliclyDecryptable(market.totalNo);
+            marketTotalsOpened[marketId] = true;
+            emit MarketTotalsOpened(marketId);
         }
 
-        uint256 distributablePool = pool - fee;
-        uint256 payout = (winnerBetAmount * distributablePool) / totalWinningSide;
-        if (payout > address(this).balance) revert PayoutExceedsBalance();
+        for (uint256 i = 0; i < bettors.length; ++i) {
+            address bettor = bettors[i];
+            if (!hasPosition[marketId][bettor] || settlementDataOpened[marketId][bettor]) {
+                continue;
+            }
 
-        uint256 previousPayout = claimablePayouts[marketId][winner];
-        uint256 reservedBalance = reservedPayoutBalance[marketId];
-        if (payout > previousPayout) {
-            uint256 additionalReservation = payout - previousPayout;
-            if (reservedBalance + additionalReservation > distributablePool) revert InsufficientPoolBalance();
-            reservedPayoutBalance[marketId] = reservedBalance + additionalReservation;
-        } else if (previousPayout > payout) {
-            reservedPayoutBalance[marketId] = reservedBalance - (previousPayout - payout);
+            betAmounts[marketId][bettor] = FHE.makePubliclyDecryptable(betAmounts[marketId][bettor]);
+            betOutcomes[marketId][bettor] = FHE.makePubliclyDecryptable(betOutcomes[marketId][bettor]);
+            settlementDataOpened[marketId][bettor] = true;
+
+            emit SettlementDataOpened(marketId, bettor);
         }
+    }
 
-        claimablePayouts[marketId][winner] = payout;
-        emit PayoutAssigned(marketId, winner, payout);
+    function withdrawAccruedFees(address payable recipient) external onlyOwner {
+        uint256 amount = accruedFees;
+        if (amount == 0) revert NothingToWithdraw();
+        accruedFees = 0;
+
+        (bool sent, ) = recipient.call{value: amount}("");
+        require(sent, "ETH transfer failed");
+
+        emit FeesWithdrawn(recipient, amount);
     }
 
     function claimWinnings(uint256 marketId) external {
@@ -285,5 +314,43 @@ contract ShieldBet is ZamaEthereumConfig, Ownable {
     function _requireMarket(uint256 marketId) internal view returns (Market storage market) {
         market = markets[marketId];
         if (market.deadline == 0) revert MarketNotFound();
+    }
+
+    function _computeAndAssignPayout(
+        uint256 marketId,
+        address winner,
+        uint256 winnerBetAmount,
+        uint256 totalWinningSide
+    ) internal {
+        Market storage market = _requireMarket(marketId);
+        if (!market.resolved) revert MarketNotResolved();
+        if (hasClaimed[marketId][winner]) revert AlreadyClaimed();
+        if (winnerBetAmount == 0 || totalWinningSide == 0 || winnerBetAmount > totalWinningSide) revert InvalidWinningTotals();
+
+        uint256 pool = totalPool[marketId];
+        uint256 fee = marketFeeAmount[marketId];
+        if (!payoutModelInitialized[marketId]) {
+            fee = (pool * feeBasisPoints[marketId]) / 10_000;
+            marketFeeAmount[marketId] = fee;
+            payoutModelInitialized[marketId] = true;
+            accruedFees += fee;
+        }
+
+        uint256 distributablePool = pool - fee;
+        uint256 payout = (winnerBetAmount * distributablePool) / totalWinningSide;
+        if (payout > address(this).balance) revert PayoutExceedsBalance();
+
+        uint256 previousPayout = claimablePayouts[marketId][winner];
+        uint256 reservedBalance = reservedPayoutBalance[marketId];
+        if (payout > previousPayout) {
+            uint256 additionalReservation = payout - previousPayout;
+            if (reservedBalance + additionalReservation > distributablePool) revert InsufficientPoolBalance();
+            reservedPayoutBalance[marketId] = reservedBalance + additionalReservation;
+        } else if (previousPayout > payout) {
+            reservedPayoutBalance[marketId] = reservedBalance - (previousPayout - payout);
+        }
+
+        claimablePayouts[marketId][winner] = payout;
+        emit PayoutAssigned(marketId, winner, payout);
     }
 }

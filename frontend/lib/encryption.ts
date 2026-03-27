@@ -1,5 +1,7 @@
 import { Address, bytesToHex, getAddress } from "viem";
+import type { WalletClient } from "viem";
 import { logInfo } from "@/lib/telemetry";
+import { resolveFhevmEnvConfig } from "@/lib/fhevm-config";
 
 export type BetOutcome = 1 | 2;
 
@@ -14,42 +16,19 @@ interface EncryptBetParams {
   userAddress: Address;
 }
 
+interface UserDecryptParams {
+  contractAddress: Address;
+  userAddress: Address;
+  walletClient: WalletClient;
+  handles: (`0x${string}` | null | undefined)[];
+}
+
 type FhevmWebModule = typeof import("@zama-fhe/relayer-sdk/web");
 type FhevmInstance = Awaited<ReturnType<FhevmWebModule["createInstance"]>>;
 
 const MAX_UINT64 = (1n << 64n) - 1n;
 let fhevmInstancePromise: Promise<FhevmInstance> | null = null;
 let fhevmSdkInitPromise: Promise<void> | null = null;
-
-function getCustomFhevmConfig(chainId: number, network: string) {
-  const useCustom = process.env.NEXT_PUBLIC_FHEVM_USE_CUSTOM === "true";
-  if (!useCustom) return null;
-
-  const acl = process.env.NEXT_PUBLIC_FHEVM_ACL_CONTRACT;
-  const kms = process.env.NEXT_PUBLIC_FHEVM_KMS_CONTRACT;
-  const inputVerifier = process.env.NEXT_PUBLIC_FHEVM_INPUT_VERIFIER_CONTRACT;
-  const verifyDecrypt = process.env.NEXT_PUBLIC_FHEVM_VERIFY_DECRYPTION_CONTRACT;
-  const verifyInput = process.env.NEXT_PUBLIC_FHEVM_VERIFY_INPUT_CONTRACT;
-  const gatewayChainId = process.env.NEXT_PUBLIC_FHEVM_GATEWAY_CHAIN_ID;
-  const relayerUrl = process.env.NEXT_PUBLIC_FHEVM_RELAYER_URL;
-
-  const hasAllCustomVars =
-    acl && kms && inputVerifier && verifyDecrypt && verifyInput && gatewayChainId && relayerUrl;
-
-  if (!hasAllCustomVars) return null;
-
-  return {
-    aclContractAddress: getAddress(acl),
-    kmsContractAddress: getAddress(kms),
-    inputVerifierContractAddress: getAddress(inputVerifier),
-    verifyingContractAddressDecryption: getAddress(verifyDecrypt),
-    verifyingContractAddressInputVerification: getAddress(verifyInput),
-    chainId,
-    gatewayChainId: Number(gatewayChainId),
-    relayerUrl,
-    network
-  };
-}
 
 async function getFhevmInstance(): Promise<FhevmInstance> {
   if (fhevmInstancePromise) return fhevmInstancePromise;
@@ -68,36 +47,40 @@ async function getFhevmInstance(): Promise<FhevmInstance> {
     }
     await fhevmSdkInitPromise;
 
-    const chainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID || 11155111);
-    const network = process.env.NEXT_PUBLIC_CHAIN_RPC_URL;
+    const config = resolveFhevmEnvConfig();
 
-    if (!network) {
-      throw new Error("Missing NEXT_PUBLIC_CHAIN_RPC_URL for FHEVM relayer encryption");
-    }
-
-    const customConfig = getCustomFhevmConfig(chainId, network);
-
-    if (customConfig) {
+    if (config.relayerUrl && config.gatewayChainId && config.aclContractAddress && config.kmsContractAddress) {
+      const customConfig = {
+        chainId: config.chainId,
+        network: config.network,
+        relayerUrl: config.relayerUrl,
+        gatewayChainId: config.gatewayChainId,
+        aclContractAddress: config.aclContractAddress,
+        kmsContractAddress: config.kmsContractAddress,
+        inputVerifierContractAddress: config.inputVerifierContractAddress!,
+        verifyingContractAddressDecryption: config.verifyingContractAddressDecryption!,
+        verifyingContractAddressInputVerification: config.verifyingContractAddressInputVerification!
+      };
       logInfo("encryption", "using custom FHEVM config", {
-        chainId,
-        relayerUrl: customConfig.relayerUrl
+        chainId: config.chainId,
+        relayerUrl: config.relayerUrl
       });
       return sdk.createInstance(customConfig);
     }
 
-    if (chainId === 11155111) {
-      logInfo("encryption", "using Sepolia FHEVM defaults", { chainId, network });
+    if (config.chainId === 11155111) {
+      logInfo("encryption", "using Sepolia FHEVM defaults", { chainId: config.chainId, network: config.network });
       return sdk.createInstance({
         ...sdk.SepoliaConfig,
-        network
+        network: config.network
       });
     }
 
-    if (chainId === 1) {
-      logInfo("encryption", "using Mainnet FHEVM defaults", { chainId, network });
+    if (config.chainId === 1) {
+      logInfo("encryption", "using Mainnet FHEVM defaults", { chainId: config.chainId, network: config.network });
       return sdk.createInstance({
         ...sdk.MainnetConfig,
-        network
+        network: config.network
       });
     }
 
@@ -138,4 +121,46 @@ export async function encryptBetInputs(
     encAmount: bytesToHex(encrypted.handles[1]) as `0x${string}`,
     inputProof: bytesToHex(encrypted.inputProof) as `0x${string}`
   };
+}
+
+export async function decryptUserHandles({
+  contractAddress,
+  userAddress,
+  walletClient,
+  handles
+}: UserDecryptParams): Promise<Record<`0x${string}`, bigint | number | boolean | string>> {
+  const sanitizedHandles = handles.filter(Boolean) as `0x${string}`[];
+  if (!sanitizedHandles.length) return {};
+
+  const instance = await getFhevmInstance();
+  const keypair = instance.generateKeypair();
+  const startTimestamp = Math.floor(Date.now() / 1000);
+  const durationDays = 1;
+  const eip712 = instance.createEIP712(keypair.publicKey, [getAddress(contractAddress)], startTimestamp, durationDays);
+
+  const signature = await (walletClient.signTypedData as (...args: any[]) => Promise<`0x${string}`>)({
+    domain: eip712.domain,
+    types: {
+      UserDecryptRequestVerification: eip712.types.UserDecryptRequestVerification
+    },
+    primaryType: "UserDecryptRequestVerification",
+    message: eip712.message,
+    account: walletClient.account || getAddress(userAddress)
+  });
+
+  const result = await instance.userDecrypt(
+    sanitizedHandles.map((handle) => ({
+      handle,
+      contractAddress: getAddress(contractAddress)
+    })),
+    keypair.privateKey,
+    keypair.publicKey,
+    signature,
+    [getAddress(contractAddress)],
+    getAddress(userAddress),
+    startTimestamp,
+    durationDays
+  );
+
+  return result as Record<`0x${string}`, bigint | number | boolean | string>;
 }
