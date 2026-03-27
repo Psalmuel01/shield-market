@@ -45,10 +45,34 @@ function asString(value: unknown): string | undefined {
   return undefined;
 }
 
-function parseLitAttestation(body: Partial<ClaimRequest>) {
-  if (!body.litActionCid || !body.litResponse || typeof body.litResponse !== "object") return null;
+function unwrapLitResponse(value: unknown): unknown {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return value;
+    try {
+      return unwrapLitResponse(JSON.parse(trimmed));
+    } catch {
+      return value;
+    }
+  }
 
-  const root = body.litResponse as Record<string, unknown>;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if ("response" in record && record.response !== value) {
+      return unwrapLitResponse(record.response);
+    }
+  }
+
+  return value;
+}
+
+function parseLitAttestation(body: Partial<ClaimRequest>) {
+  if (!body.litActionCid || !body.litResponse) return null;
+
+  const normalized = unwrapLitResponse(body.litResponse);
+  if (!normalized || typeof normalized !== "object") return null;
+
+  const root = normalized as Record<string, unknown>;
   const candidate =
     root.attestation && typeof root.attestation === "object"
       ? (root.attestation as LitAttestationPayload)

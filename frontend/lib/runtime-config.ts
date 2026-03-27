@@ -24,6 +24,8 @@ export function getRuntimeDiagnostics(): RuntimeDiagnostic[] {
   const address = process.env.NEXT_PUBLIC_SHIELDBET_ADDRESS;
   const rpcUrl = process.env.NEXT_PUBLIC_CHAIN_RPC_URL;
   const useCustomFhevm = process.env.NEXT_PUBLIC_FHEVM_USE_CUSTOM === "true";
+  const litActionCid = process.env.NEXT_PUBLIC_LIT_ACTION_CID;
+  const litNetwork = process.env.NEXT_PUBLIC_LIT_NETWORK || "naga-dev";
 
   if (!address) {
     diagnostics.push({
@@ -50,6 +52,20 @@ export function getRuntimeDiagnostics(): RuntimeDiagnostic[] {
     diagnostics.push({
       severity: "error",
       message: `Chain ID ${chainId} requires explicit NEXT_PUBLIC_FHEVM_* relayer configuration for client encryption.`
+    });
+  }
+
+  if (!litActionCid || litActionCid === "QmLitActionCid") {
+    diagnostics.push({
+      severity: "warning",
+      message: "Lit claim verification is using a placeholder NEXT_PUBLIC_LIT_ACTION_CID. Claims will fall back or fail until you set a real Lit Action CID."
+    });
+  }
+
+  if (litNetwork !== "naga-dev") {
+    diagnostics.push({
+      severity: "warning",
+      message: `NEXT_PUBLIC_LIT_NETWORK is set to ${litNetwork}. On this machine, naga-dev is the verified working network for Lit handshakes.`
     });
   }
 

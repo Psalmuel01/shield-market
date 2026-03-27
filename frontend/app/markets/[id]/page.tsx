@@ -29,7 +29,7 @@ export default function MarketBetPage() {
   const initialSide = searchParams?.get("side")?.toLowerCase();
 
   const [selectedOutcome, setSelectedOutcome] = useState<BetOutcome>(initialSide === "no" ? 2 : 1);
-  const [amount, setAmount] = useState("0.10");
+  const [amount, setAmount] = useState("0.0001");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [claimOpen, setClaimOpen] = useState(false);
 
@@ -703,7 +703,7 @@ export default function MarketBetPage() {
                     disabled={!marketClosed}
                     className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-white"
                   >
-                    {marketClosed ? "Resolve market" : `Resolve after ${formatDeadline(deadline)}`}
+                    Resolve Market
                   </button>
                 </>
               ) : (

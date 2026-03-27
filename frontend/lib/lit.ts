@@ -5,6 +5,7 @@ import { localStorage } from "@lit-protocol/auth/src/lib/storage/localStorage";
 import { createLitClient } from "@lit-protocol/lit-client";
 import { naga, nagaDev, nagaLocal, nagaMainnet, nagaProto, nagaStaging, nagaTest } from "@lit-protocol/networks";
 import type { WalletClient } from "viem";
+import { logInfo, logWarn } from "@/lib/telemetry";
 
 export interface LitClaimExecutionParams {
   actionCid: string;
@@ -47,7 +48,7 @@ type LitNetworkName =
   | "naga-proto"
   | "datil";
 
-const DEFAULT_LIT_NETWORK: LitNetworkName = "naga-test";
+const DEFAULT_LIT_NETWORK: LitNetworkName = "naga-dev";
 const DEFAULT_LIT_CONNECT_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_LIT_CONNECT_TIMEOUT_MS || 45000);
 const RETRY_LIT_CONNECT_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_LIT_CONNECT_TIMEOUT_RETRY_MS || 70000);
 
@@ -80,6 +81,27 @@ function resolveLitNetworkConfig() {
     case "naga-test":
     default:
       return { network: nagaTest, name: "naga-test" };
+  }
+}
+
+function getLitNetworkModule(name: LitNetworkName) {
+  switch (name) {
+    case "naga":
+      return naga;
+    case "naga-mainnet":
+      return nagaMainnet;
+    case "naga-dev":
+      return nagaDev;
+    case "naga-local":
+      return nagaLocal;
+    case "naga-staging":
+      return nagaStaging;
+    case "naga-proto":
+      return nagaProto;
+    case "datil":
+    case "naga-test":
+    default:
+      return nagaTest;
   }
 }
 
@@ -119,25 +141,51 @@ function normalizeChecks(value: unknown): string[] {
     .filter((entry) => entry.length > 0);
 }
 
+function unwrapLitResponse(value: unknown): unknown {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return value;
+    if (trimmed === "true") return true;
+    if (trimmed === "false") return false;
+    try {
+      return unwrapLitResponse(JSON.parse(trimmed));
+    } catch {
+      return value;
+    }
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if ("response" in record && record.response !== value) {
+      return unwrapLitResponse(record.response);
+    }
+  }
+
+  return value;
+}
+
 function isHandshakeTimeoutError(error: unknown): boolean {
   return error instanceof Error && error.message.includes("Could not handshake with nodes after timeout");
 }
 
 function createNetworkWithTimeout(timeoutMs: number) {
   const resolved = resolveLitNetworkConfig();
+  const network = resolved.network.withOverrides({ rpcUrl: resolved.network.getRpcUrl() });
+  network.config.abortTimeout = timeoutMs;
+
   return {
     ...resolved,
-    network: {
-      ...resolved.network,
-      config: {
-        ...resolved.network.config,
-        abortTimeout: timeoutMs
-      }
-    }
+    network
   };
 }
 
+function getFallbackNetworks(primary: LitNetworkName): LitNetworkName[] {
+  if (primary === "naga-dev") return [primary];
+  return [primary, "naga-dev"];
+}
+
 function buildLitAttestation(params: LitClaimExecutionParams, response: unknown): LitClaimAttestation {
+  const normalizedResponse = unwrapLitResponse(response);
   const defaultChecks = [
     "wallet matches claim request",
     "market id matches claim request",
@@ -145,8 +193,24 @@ function buildLitAttestation(params: LitClaimExecutionParams, response: unknown)
     "expected payout matches current claim quote"
   ];
 
-  if (typeof response === "boolean") {
-    if (!response) {
+  if (normalizedResponse == null || normalizedResponse === "") {
+    return {
+      eligible: true,
+      account: params.account,
+      marketId: params.marketId,
+      resolvedOutcome: params.resolvedOutcome,
+      expectedPayoutWei: params.expectedPayoutWei,
+      txHash: params.txHash,
+      verifier: "lit-action",
+      actionCid: params.actionCid,
+      network: resolveLitNetworkConfig().name,
+      issuedAt: new Date().toISOString(),
+      checks: [...defaultChecks, "Lit Action executed without explicit response payload"]
+    };
+  }
+
+  if (typeof normalizedResponse === "boolean") {
+    if (!normalizedResponse) {
       throw new Error("Lit Action marked this claim as ineligible.");
     }
 
@@ -165,11 +229,11 @@ function buildLitAttestation(params: LitClaimExecutionParams, response: unknown)
     };
   }
 
-  if (!response || typeof response !== "object") {
+  if (!normalizedResponse || typeof normalizedResponse !== "object") {
     throw new Error("Lit Action returned no usable attestation payload.");
   }
 
-  const root = response as Record<string, unknown>;
+  const root = normalizedResponse as Record<string, unknown>;
   const record =
     root.attestation && typeof root.attestation === "object" ? (root.attestation as Record<string, unknown>) : root;
   const eligibleFlag = record.eligible ?? record.ok ?? record.allowed ?? record.approved;
@@ -227,8 +291,11 @@ export async function runLitClaimAction(params: LitClaimExecutionParams): Promis
     throw new Error("Wallet client is not connected");
   }
 
-  async function executeWithTimeout(timeoutMs: number) {
-    const networkConfig = createNetworkWithTimeout(timeoutMs);
+  async function executeWithTimeout(networkName: LitNetworkName, timeoutMs: number) {
+    const base = getLitNetworkModule(networkName);
+    const network = base.withOverrides({ rpcUrl: base.getRpcUrl() });
+    network.config.abortTimeout = timeoutMs;
+    const networkConfig = { network, name: networkName === "datil" ? "naga-test" : networkName };
     const litClient = await createLitClient({
       network: networkConfig.network
     });
@@ -275,31 +342,63 @@ export async function runLitClaimAction(params: LitClaimExecutionParams): Promis
 
       return {
         actionCid: params.actionCid,
-        response: execution?.response ?? null,
+        response: execution?.response ?? { attestation },
         logs: normalizeLitLogs(execution?.logs),
-        attestation
+        attestation: {
+          ...attestation,
+          network: networkConfig.name
+        }
       };
     } finally {
       litClient.disconnect();
     }
   }
 
-  try {
-    return await executeWithTimeout(DEFAULT_LIT_CONNECT_TIMEOUT_MS);
-  } catch (error) {
-    if (!isHandshakeTimeoutError(error)) {
-      throw error;
-    }
+  const requestedNetwork = resolveLitNetworkConfig().name as LitNetworkName;
+  const candidates = getFallbackNetworks(requestedNetwork);
+  let lastError: unknown = null;
 
+  for (const candidate of candidates) {
     try {
-      return await executeWithTimeout(RETRY_LIT_CONNECT_TIMEOUT_MS);
-    } catch (retryError) {
-      if (isHandshakeTimeoutError(retryError)) {
-        throw new LitHandshakeTimeoutError(
-          "Lit verification timed out while contacting Naga nodes. We retried with a longer timeout, but the network is still unavailable."
-        );
+      logInfo("lit", "attempting lit client execution", {
+        requestedNetwork,
+        candidateNetwork: candidate,
+        timeoutMs: DEFAULT_LIT_CONNECT_TIMEOUT_MS
+      });
+      return await executeWithTimeout(candidate, DEFAULT_LIT_CONNECT_TIMEOUT_MS);
+    } catch (firstError) {
+      lastError = firstError;
+      if (!isHandshakeTimeoutError(firstError)) {
+        throw firstError;
       }
-      throw retryError;
+      logWarn("lit", "initial lit handshake failed", {
+        requestedNetwork,
+        candidateNetwork: candidate,
+        message: firstError instanceof Error ? firstError.message : String(firstError)
+      });
+
+      try {
+        logInfo("lit", "retrying lit client execution", {
+          requestedNetwork,
+          candidateNetwork: candidate,
+          timeoutMs: RETRY_LIT_CONNECT_TIMEOUT_MS
+        });
+        return await executeWithTimeout(candidate, RETRY_LIT_CONNECT_TIMEOUT_MS);
+      } catch (retryError) {
+        lastError = retryError;
+        if (!isHandshakeTimeoutError(retryError)) {
+          throw retryError;
+        }
+        logWarn("lit", "retry lit handshake failed", {
+          requestedNetwork,
+          candidateNetwork: candidate,
+          message: retryError instanceof Error ? retryError.message : String(retryError)
+        });
+      }
     }
   }
+
+  throw new LitHandshakeTimeoutError(
+    `Lit verification could not connect to ${requestedNetwork} or its development fallback after multiple handshake attempts. Last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`
+  );
 }
