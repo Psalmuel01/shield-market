@@ -82,6 +82,16 @@ export const shieldBetAbi = [
   },
   {
     type: "function",
+    name: "stakeAmounts",
+    stateMutability: "view",
+    inputs: [
+      { name: "marketId", type: "uint256" },
+      { name: "account", type: "address" }
+    ],
+    outputs: [{ name: "", type: "uint256" }]
+  },
+  {
+    type: "function",
     name: "createMarket",
     stateMutability: "nonpayable",
     inputs: [
@@ -141,7 +151,6 @@ export const shieldBetAbi = [
     inputs: [
       { name: "marketId", type: "uint256" },
       { name: "encOutcome", type: "bytes32" },
-      { name: "encAmount", type: "bytes32" },
       { name: "inputProof", type: "bytes" }
     ],
     outputs: []
@@ -154,6 +163,13 @@ export const shieldBetAbi = [
       { name: "marketId", type: "uint256" },
       { name: "outcome", type: "uint8" }
     ],
+    outputs: []
+  },
+  {
+    type: "function",
+    name: "cancelUnresolvedMarket",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "marketId", type: "uint256" }],
     outputs: []
   },
   {
@@ -216,13 +232,6 @@ export const shieldBetAbi = [
   },
   {
     type: "function",
-    name: "getMyBet",
-    stateMutability: "view",
-    inputs: [{ name: "marketId", type: "uint256" }],
-    outputs: [{ name: "", type: "bytes32" }]
-  },
-  {
-    type: "function",
     name: "getMyOutcome",
     stateMutability: "view",
     inputs: [{ name: "marketId", type: "uint256" }],
@@ -257,5 +266,12 @@ export const shieldBetAbi = [
       { name: "payout", type: "uint256" },
       { name: "eligible", type: "bool" }
     ]
+  },
+  {
+    type: "function",
+    name: "RESOLUTION_GRACE_PERIOD",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }]
   }
 ] as const;

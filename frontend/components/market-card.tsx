@@ -34,6 +34,13 @@ const statusStyles: Record<string, string> = {
   Resolved: "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
 };
 
+function outcomeLabel(outcome: number) {
+  if (outcome === 1) return "YES";
+  if (outcome === 2) return "NO";
+  if (outcome === 3) return "Cancelled";
+  return "Unresolved";
+}
+
 export function MarketCard({ marketId, question, deadline, outcome, resolved, category, metadataCid, resolutionCid, poolBalanceWei }: MarketCardProps) {
   const status = getMarketStatus(deadline, resolved);
   const closed = status === "Closed";
@@ -54,7 +61,10 @@ export function MarketCard({ marketId, question, deadline, outcome, resolved, ca
 
       <div className="mt-3 space-y-1">
         {resolved ? (
-          <p className="text-sm text-slate-600 dark:text-slate-400">Market closed {formatDeadline(deadline)}</p>
+          <>
+            <p className="text-sm text-slate-600 dark:text-slate-400">Market closed {formatDeadline(deadline)}</p>
+            <p className="text-sm text-slate-600 dark:text-slate-400">Outcome {outcomeLabel(outcome)}</p>
+          </>
         ) : closed ? (
           <p className="text-sm text-slate-600 dark:text-slate-400">Market closed {formatDeadline(deadline)}</p>
         ) : (
@@ -68,18 +78,18 @@ export function MarketCard({ marketId, question, deadline, outcome, resolved, ca
 
       <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50/70 p-3 dark:border-indigo-500/30 dark:bg-indigo-500/10">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-medium text-indigo-700 dark:text-indigo-300">Encrypted activity</p>
+          <p className="text-sm font-medium text-indigo-700 dark:text-indigo-300">Encrypted side activity</p>
           <Lock className="enc-pulse h-4 w-4 text-indigo-500" />
         </div>
         <p className="font-mono-ui mt-1 text-sm text-indigo-700 dark:text-indigo-300">{encryptedBandText} encrypted</p>
-        <p className="mt-2 text-xs text-indigo-700/80 dark:text-indigo-300/80" title="Bet amounts are fully encrypted. No one can see positions until settlement.">
-          Privacy band only. It does not represent exact public volume.
+        <p className="mt-2 text-xs text-indigo-700/80 dark:text-indigo-300/80" title="Wallet side selection stays encrypted until settlement data is opened after resolution.">
+          Privacy band only. In v1, stake size is public while side selection stays encrypted.
         </p>
       </div>
 
       {resolved && (
         <p className="mt-3 inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 dark:bg-slate-900 dark:text-slate-300">
-          <ShieldAlert className="h-3.5 w-3.5" /> Resolved: {outcome === 1 ? "YES" : "NO"}
+          <ShieldAlert className="h-3.5 w-3.5" /> Final state: {outcomeLabel(outcome)}
         </p>
       )}
 

@@ -5,7 +5,7 @@ import "@/styles/globals.css";
 
 export const metadata: Metadata = {
   title: "ShieldBet | Confidential Prediction Markets",
-  description: "Prediction markets with encrypted positions. No front-running. True price discovery."
+  description: "Prediction markets with encrypted side selection and public ETH settlement for honest v1 operation."
 };
 
 export default function RootLayout({

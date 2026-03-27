@@ -9,10 +9,10 @@ export default function MarketsPage() {
           <Lock className="h-3.5 w-3.5" /> Markets
         </p>
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100 md:text-4xl">
-          Prediction markets with encrypted positions.
+          Prediction markets with encrypted side selection.
         </h1>
         <p className="mt-3 max-w-2xl text-sm text-slate-600 dark:text-slate-300 md:text-base">
-          No front-running. No leaked sizes. Your bets remain confidential until settlement.
+          ShieldBet v1 keeps your YES or NO side encrypted on-chain while ETH stakes remain public for honest settlement.
         </p>
       </div>
 

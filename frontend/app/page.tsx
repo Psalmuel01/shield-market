@@ -10,10 +10,10 @@ export default function Home() {
             <Shield className="h-3.5 w-3.5" /> Confidential Markets
           </p>
           <h1 className="text-3xl font-semibold tracking-tight text-slate-900 dark:text-slate-100 md:text-5xl">
-            Prediction markets with encrypted positions.
+            Prediction markets with encrypted side selection.
           </h1>
           <p className="mt-4 max-w-2xl text-base text-slate-600 dark:text-slate-300 md:text-lg">
-            No front-running. No position sniping. Your bets remain confidential until settlement and claim.
+            ShieldBet v1 keeps your YES or NO side encrypted on-chain while ETH stakes stay public for clean settlement.
           </p>
           <div className="mt-6 flex flex-wrap items-center gap-3">
             <Link

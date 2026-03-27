@@ -7,7 +7,6 @@ export type BetOutcome = 1 | 2;
 
 export interface EncryptedBetPayload {
   encOutcome: `0x${string}`;
-  encAmount: `0x${string}`;
   inputProof: `0x${string}`;
 }
 
@@ -112,13 +111,11 @@ export async function encryptBetInputs(
   const encryptedInput = instance.createEncryptedInput(getAddress(params.contractAddress), getAddress(params.userAddress));
 
   encryptedInput.add8(outcome);
-  encryptedInput.add64(amountWei);
 
   const encrypted = await encryptedInput.encrypt();
 
   return {
     encOutcome: bytesToHex(encrypted.handles[0]) as `0x${string}`,
-    encAmount: bytesToHex(encrypted.handles[1]) as `0x${string}`,
     inputProof: bytesToHex(encrypted.inputProof) as `0x${string}`
   };
 }

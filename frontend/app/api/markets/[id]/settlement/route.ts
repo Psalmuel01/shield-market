@@ -8,7 +8,7 @@ import { logError, logInfo } from "@/lib/telemetry";
 export const runtime = "nodejs";
 
 const betPlacedEvent = parseAbiItem(
-  "event BetPlaced(uint256 indexed marketId, address indexed bettor, bytes32 encOutcomeHandle, bytes32 encAmountHandle)"
+  "event BetPlaced(uint256 indexed marketId, address indexed bettor, bytes32 encOutcomeHandle, uint256 stakeAmountWei)"
 );
 
 function getRpcUrl() {
@@ -110,7 +110,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
       return {
         bettor: getAddress(String(decoded.args.bettor)),
         encOutcomeHandle: decoded.args.encOutcomeHandle as `0x${string}`,
-        encAmountHandle: decoded.args.encAmountHandle as `0x${string}`
+        stakeAmountWei: BigInt(decoded.args.stakeAmountWei as bigint | string | number)
       };
     });
 
@@ -129,7 +129,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
       });
     }
 
-    const allHandles = participants.flatMap((participant) => [participant.encOutcomeHandle, participant.encAmountHandle]);
+    const allHandles = participants.map((participant) => participant.encOutcomeHandle);
 
     let decrypted: Record<`0x${string}`, bigint | number | boolean | string>;
     try {
@@ -155,13 +155,12 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
 
     const clearParticipants = participants.map((participant) => {
       const clearOutcome = Number(decrypted[participant.encOutcomeHandle]);
-      const clearAmount = BigInt(decrypted[participant.encAmountHandle] as bigint | number | string);
       const participantOutcome: "YES" | "NO" = clearOutcome === 1 ? "YES" : "NO";
 
       return {
         bettor: participant.bettor,
         outcome: participantOutcome,
-        amountWei: clearAmount,
+        amountWei: participant.stakeAmountWei,
         isWinner: participantOutcome === winningOutcome
       };
     });
