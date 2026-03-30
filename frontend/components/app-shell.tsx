@@ -42,7 +42,7 @@ function ShellWalletButton({ collapsed = false }: { collapsed?: boolean }) {
             <button
               type="button"
               onClick={openConnectModal}
-              className={`vm-wallet-btn ${collapsed ? "justify-center px-0" : "justify-center"}`}
+              className={`vm-wallet-btn w-full ${collapsed ? "justify-center px-0" : "justify-center"}`}
             >
               <Sparkles className="h-4 w-4" />
               {!collapsed ? <span>Connect Wallet</span> : null}

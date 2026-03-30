@@ -143,26 +143,6 @@ export const shieldBetAbi = [
   },
   {
     type: "function",
-    name: "anchorMarketMetadataCID",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "marketId", type: "uint256" },
-      { name: "cid", type: "string" }
-    ],
-    outputs: []
-  },
-  {
-    type: "function",
-    name: "anchorResolutionCID",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "marketId", type: "uint256" },
-      { name: "cid", type: "string" }
-    ],
-    outputs: []
-  },
-  {
-    type: "function",
     name: "placeBet",
     stateMutability: "payable",
     inputs: [
@@ -211,6 +191,17 @@ export const shieldBetAbi = [
   },
   {
     type: "function",
+    name: "assignPayoutManual",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "marketId", type: "uint256" },
+      { name: "winner", type: "address" },
+      { name: "payout", type: "uint256" }
+    ],
+    outputs: []
+  },
+  {
+    type: "function",
     name: "withdrawAccruedFees",
     stateMutability: "nonpayable",
     inputs: [{ name: "recipient", type: "address" }],
@@ -233,16 +224,6 @@ export const shieldBetAbi = [
   {
     type: "function",
     name: "getBetOutcomeHandle",
-    stateMutability: "view",
-    inputs: [
-      { name: "marketId", type: "uint256" },
-      { name: "bettor", type: "address" }
-    ],
-    outputs: [{ name: "", type: "bytes32" }]
-  },
-  {
-    type: "function",
-    name: "getSettlementWinnerHandle",
     stateMutability: "view",
     inputs: [
       { name: "marketId", type: "uint256" },

@@ -307,6 +307,19 @@ contract ShieldBet is ZamaEthereumConfig, Ownable {
         return markets[marketId].outcomeLabels;
     }
 
+    function getMarketDetails(uint256 marketId) external view returns (string memory, string memory, string memory) {
+        MarketDetails storage details = marketDetails[marketId];
+        return (details.category, details.resolutionCriteria, details.resolutionSource);
+    }
+
+    function getMyOutcome(uint256 marketId) external view returns (euint8) {
+        return betOutcomes[marketId][msg.sender];
+    }
+
+    function getBetOutcomeHandle(uint256 marketId, address bettor) external view returns (euint8) {
+        return betOutcomes[marketId][bettor];
+    }
+
     function _requireMarket(uint256 marketId) internal view returns (Market storage market) {
         market = markets[marketId];
         if (market.deadline == 0) revert MarketNotFound();

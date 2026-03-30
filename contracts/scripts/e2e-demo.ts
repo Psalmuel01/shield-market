@@ -93,6 +93,12 @@ async function main() {
   console.log("Finalizing outcome...");
   await (await shieldBet.finalizeOutcome(marketId, 0)).wait();
 
+  console.log("Opening settlement data...");
+  await (await shieldBet.openSettlementData(marketId, [owner.address])).wait();
+
+  console.log("Assigning manual payout...");
+  await (await shieldBet.assignPayoutManual(marketId, owner.address, stake)).wait();
+
   console.log("Claiming winnings...");
   const claimTx = await shieldBet.claimWinnings(marketId);
   const claimReceipt = await claimTx.wait();

@@ -57,6 +57,12 @@ export default function MarketDetailPage() {
   const [isBetting, setIsBetting] = useState(false);
   const [decryptedPosition, setDecryptedPosition] = useState<number | null>(null);
   const [isDecrypting, setIsDecrypting] = useState(false);
+  const [settlementAddresses, setSettlementAddresses] = useState("");
+  const [winnerAddress, setWinnerAddress] = useState("");
+  const [manualPayoutEth, setManualPayoutEth] = useState("");
+  const [isOpeningSettlement, setIsOpeningSettlement] = useState(false);
+  const [isAssigningPayout, setIsAssigningPayout] = useState(false);
+  const [isClaiming, setIsClaiming] = useState(false);
 
   const { address } = useAccount();
   const publicClient = usePublicClient();
@@ -116,7 +122,22 @@ export default function MarketDetailPage() {
     ...shieldBetConfig,
     functionName: "getMyOutcome",
     args: [marketId],
+    account: address,
     query: { enabled: Boolean(address && hasPosition) }
+  });
+
+  const { data: claimablePayout, refetch: refetchClaimablePayout } = useReadContract({
+    ...shieldBetConfig,
+    functionName: "claimablePayouts",
+    args: [marketId, address || ZERO_ADDRESS],
+    query: { enabled: Boolean(address) }
+  });
+
+  const { data: hasClaimed } = useReadContract({
+    ...shieldBetConfig,
+    functionName: "hasClaimed",
+    args: [marketId, address || ZERO_ADDRESS],
+    query: { enabled: Boolean(address) }
   });
 
   const parsedMarket = useMemo(() => decodeMarketView(marketData), [marketData]);
@@ -260,6 +281,7 @@ export default function MarketDetailPage() {
 
   async function onClaim() {
     if (!address) return;
+    setIsClaiming(true);
     setStatusMessage("Claiming winnings...");
     try {
       const txHash = await writeContractAsync({
@@ -267,12 +289,110 @@ export default function MarketDetailPage() {
         functionName: "claimWinnings",
         args: [marketId]
       });
-      await publicClient?.waitForTransactionReceipt({ hash: txHash });
-      setStatusMessage("Winnings claimed.");
-      await refetchMarket();
+      const receipt = await publicClient?.waitForTransactionReceipt({ hash: txHash });
+
+      let claimMessage = "Winnings claimed.";
+      try {
+        const response = await fetch("/api/lit/claim", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            marketId: marketId.toString(),
+            txHash,
+            account: address,
+            expectedPayoutWei: (claimablePayout || 0n).toString()
+          })
+        });
+
+        if (response.ok) {
+          claimMessage = "Winnings claimed. Lit verification completed.";
+        } else {
+          claimMessage = "Winnings claimed. Lit verification was unavailable.";
+        }
+      } catch {
+        claimMessage = "Winnings claimed. Lit verification was unavailable.";
+      }
+
+      if (receipt?.status === "success") {
+        setStatusMessage(claimMessage);
+      }
+      await Promise.all([refetchMarket(), refetchClaimablePayout()]);
     } catch (error) {
       logError("market-detail", "claim failed", error);
       setStatusMessage(error instanceof Error ? error.message : "Claim failed");
+    } finally {
+      setIsClaiming(false);
+    }
+  }
+
+  async function onOpenSettlementData() {
+    if (!settlementAddresses.trim()) {
+      setStatusMessage("Add at least one bettor address to open settlement data.");
+      return;
+    }
+
+    let bettors: `0x${string}`[];
+    try {
+      bettors = Array.from(
+        new Set(
+          settlementAddresses
+            .split(/[\s,]+/)
+            .map((value) => value.trim())
+            .filter(Boolean)
+            .map((value) => getAddress(value))
+        )
+      ) as `0x${string}`[];
+    } catch {
+      setStatusMessage("One or more settlement addresses are invalid.");
+      return;
+    }
+
+    if (!bettors.length) {
+      setStatusMessage("Add at least one bettor address to open settlement data.");
+      return;
+    }
+
+    setIsOpeningSettlement(true);
+    setStatusMessage("Opening settlement data...");
+    try {
+      const txHash = await writeContractAsync({
+        ...shieldBetConfig,
+        functionName: "openSettlementData",
+        args: [marketId, bettors]
+      });
+      await publicClient?.waitForTransactionReceipt({ hash: txHash });
+      setStatusMessage("Settlement data opened.");
+      await refetchMarket();
+    } catch (error) {
+      logError("market-detail", "open settlement failed", error);
+      setStatusMessage(error instanceof Error ? error.message : "Failed to open settlement data");
+    } finally {
+      setIsOpeningSettlement(false);
+    }
+  }
+
+  async function onAssignPayout() {
+    if (!winnerAddress.trim() || !manualPayoutEth.trim()) {
+      setStatusMessage("Enter a winner address and payout amount.");
+      return;
+    }
+
+    setIsAssigningPayout(true);
+    setStatusMessage("Assigning payout...");
+    try {
+      const txHash = await writeContractAsync({
+        ...shieldBetConfig,
+        functionName: "assignPayoutManual",
+        args: [marketId, getAddress(winnerAddress.trim()), parseEther(manualPayoutEth)]
+      });
+      await publicClient?.waitForTransactionReceipt({ hash: txHash });
+      setStatusMessage("Payout assigned.");
+      await refetchClaimablePayout();
+    } catch (error) {
+      logError("market-detail", "assign payout failed", error);
+      setStatusMessage(error instanceof Error ? error.message : "Failed to assign payout");
+    } finally {
+      setIsAssigningPayout(false);
     }
   }
 
@@ -295,6 +415,8 @@ export default function MarketDetailPage() {
     parsedMarket.outcome < labels.length ? labels[parsedMarket.outcome] : `Outcome ${parsedMarket.outcome}`;
   const proposedOutcomeLabel =
     parsedMarket.proposedOutcome < labels.length ? labels[parsedMarket.proposedOutcome] : `Outcome ${parsedMarket.proposedOutcome}`;
+  const claimablePayoutWei = typeof claimablePayout === "bigint" ? claimablePayout : 0n;
+  const canClaim = isFinalized && claimablePayoutWei > 0n && !hasClaimed;
 
   return (
     <section className="vm-page page-enter">
@@ -468,10 +590,18 @@ export default function MarketDetailPage() {
                         <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-300">Official result</div>
                         <div className="font-display mt-2 text-2xl font-bold text-white">{currentOutcomeLabel}</div>
                       </div>
-                      {hasPosition ? (
-                        <button type="button" onClick={onClaim} className="vm-primary-btn justify-center">
+                      {canClaim ? (
+                        <button type="button" onClick={onClaim} disabled={isClaiming} className="vm-primary-btn justify-center disabled:cursor-not-allowed disabled:opacity-50">
                           Claim winnings
                         </button>
+                      ) : hasClaimed ? (
+                        <div className="rounded-[1.2rem] border border-emerald-400/18 bg-emerald-400/10 p-4 text-sm font-medium text-emerald-300">
+                          This wallet has already claimed.
+                        </div>
+                      ) : hasPosition ? (
+                        <div className="rounded-[1.2rem] border border-white/8 bg-white/[0.04] p-4 text-sm leading-7 text-white/68">
+                          No payout has been assigned to this wallet yet. Open settlement data and assign payouts before claiming.
+                        </div>
                       ) : null}
                     </div>
                   ) : null}
@@ -495,6 +625,60 @@ export default function MarketDetailPage() {
                   </div>
                 </div>
               </div>
+
+              {isFinalized ? (
+                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                  <div className="rounded-[1.5rem] border border-white/8 bg-black/20 p-5">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">Settlement opening</div>
+                    <p className="mt-3 text-sm leading-7 text-white/68">
+                      Open winner flags for the listed bettors so the manual settlement workflow has public settlement data to reference.
+                    </p>
+                    <textarea
+                      value={settlementAddresses}
+                      onChange={(event) => setSettlementAddresses(event.target.value)}
+                      placeholder="Paste bettor addresses, separated by commas or new lines"
+                      className="vm-input mt-4 min-h-[8rem] resize-y py-4"
+                    />
+                    <button
+                      type="button"
+                      onClick={onOpenSettlementData}
+                      disabled={isOpeningSettlement}
+                      className="vm-secondary-btn mt-4 justify-center disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isOpeningSettlement ? "Opening..." : "Open Settlement Data"}
+                    </button>
+                  </div>
+
+                  {isOwner ? (
+                    <div className="rounded-[1.5rem] border border-white/8 bg-black/20 p-5">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">Owner payout assignment</div>
+                      <p className="mt-3 text-sm leading-7 text-white/68">
+                        In this v1, the owner manually assigns payouts after the optimistic oracle has finalized the market.
+                      </p>
+                      <input
+                        value={winnerAddress}
+                        onChange={(event) => setWinnerAddress(event.target.value)}
+                        placeholder="Winner wallet address"
+                        className="vm-input mt-4"
+                      />
+                      <input
+                        value={manualPayoutEth}
+                        onChange={(event) => setManualPayoutEth(event.target.value)}
+                        placeholder="Payout amount in ETH"
+                        className="vm-input mt-3"
+                      />
+                      <button
+                        type="button"
+                        onClick={onAssignPayout}
+                        disabled={isAssigningPayout}
+                        className="vm-primary-btn mt-4 justify-center disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isAssigningPayout ? "Assigning..." : "Assign Manual Payout"}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -553,6 +737,12 @@ export default function MarketDetailPage() {
                       </span>
                     </div>
                   ) : null}
+                  <div className="rounded-[1.2rem] border border-white/6 bg-white/[0.03] px-4 py-3">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">Claimable payout</div>
+                    <div className="mt-2 text-base font-semibold text-white">
+                      {claimablePayoutWei > 0n ? `${Number(formatEther(claimablePayoutWei)).toFixed(4)} ETH` : "Not assigned"}
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <p className="mt-4 text-sm leading-7 text-white/62">No position found for this wallet on the selected market.</p>

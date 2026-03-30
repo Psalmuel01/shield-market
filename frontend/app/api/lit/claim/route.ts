@@ -148,8 +148,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unable to read market state for verification" }, { status: 400 });
   }
 
-  const onchainOutcome = Array.isArray(marketRecord) ? Number(marketRecord[2]) : Number((marketRecord as { outcome?: unknown }).outcome || 0);
-  const onchainResolved = Array.isArray(marketRecord) ? Boolean(marketRecord[3]) : Boolean((marketRecord as { resolved?: unknown }).resolved);
+  const onchainOutcome = Array.isArray(marketRecord)
+    ? Number(marketRecord[2])
+    : Number((marketRecord as { outcome?: unknown }).outcome || 0);
+  const onchainStatus = Array.isArray(marketRecord)
+    ? Number(marketRecord[3])
+    : Number((marketRecord as { status?: unknown }).status || 0);
+  const onchainResolved = onchainStatus === 4;
 
   if (!onchainResolved) {
     return NextResponse.json({ error: "Market is not resolved on-chain" }, { status: 409 });

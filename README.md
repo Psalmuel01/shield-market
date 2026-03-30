@@ -1,74 +1,83 @@
 # ShieldBet
 
-Confidential prediction markets prototype for PL Genesis 2026.
+ShieldBet is a confidential prediction market prototype built with Zama fhEVM and a Next.js frontend.
 
-ShieldBet implements a two-surface dApp (Markets dashboard + Bet page) backed by a market smart contract with encrypted-position interfaces, resolution flow, claim logic, and Filecoin/Lit integrations.
+This stabilized v1 uses an **owner-driven settlement model**:
+
+- bet **stake amounts are public ETH**
+- bet **side selection is encrypted** with fhEVM
+- outcome resolution follows an **optimistic oracle flow**
+- payouts are **assigned manually by the owner** after finalization
+- Lit is **optional post-claim attestation**, not the on-chain authority
+
+Filecoin is deferred for this phase.
 
 ## Monorepo Layout
 
-- `contracts/`: Hardhat project with `ShieldBet.sol`, tests, and deploy script.
-- `frontend/`: Next.js app with RainbowKit wallet connect, dashboard, bet page, Synapse Filecoin upload route, and Lit-assisted claim verification flow.
+- `contracts/`: Hardhat project for `ShieldBet.sol`, tests, deploy script, and Sepolia e2e script
+- `frontend/`: Next.js app for the markets board, market detail page, create market flow, and optional Lit claim verification
 
-## Architecture
+## Stabilized v1 Flow
 
 ```mermaid
 flowchart LR
-  U[User Wallet] --> F[Next.js Frontend]
-  F --> C[ShieldBet.sol on Zama Testnet]
-  F --> L[Lit Action Execution]
-  F --> FI[Synapse Upload API]
-  FI --> FC[Filecoin Calibration CID]
-  C --> FC
-  L --> U
+  U["User Wallet"] --> F["ShieldBet Frontend"]
+  F --> C["ShieldBet.sol (Sepolia)"]
+  C --> Z["Zama fhEVM"]
+  F --> L["Lit Claim Verification (Optional)"]
+
+  subgraph "Owner-Driven Settlement"
+    P["Propose Outcome"] --> D["Dispute Window"]
+    D --> O["Owner Finalizes"]
+    O --> S["Open Settlement Data"]
+    S --> A["Owner Assigns Payout"]
+    A --> W["Winner Claims"]
+  end
 ```
 
 ## Smart Contract Scope
 
-`contracts/contracts/ShieldBet.sol` includes:
+Canonical market lifecycle for this phase:
 
-- `createMarket(question, deadline) -> marketId`
-- `placeBet(marketId, externalEuint8, externalEuint64, inputProof)` (payable)
-- `resolveMarket(marketId, outcome)` (`onlyOwner`)
-- `assignWinnerPayout(marketId, winner, payoutAmount)` (`onlyOwner`)
+- `createMarketWithMetadata(question, deadline, marketType, outcomeLabels, category, resolutionCriteria, resolutionSource)`
+- `placeBet(marketId, externalEuint8, inputProof)` payable
+- `proposeOutcome(marketId, outcomeIndex)` payable
+- `challengeOutcome(marketId)` payable
+- `finalizeOutcome(marketId, finalOutcome)` onlyOwner
+- `openSettlementData(marketId, bettors)`
+- `assignPayoutManual(marketId, winner, payout)` onlyOwner
 - `claimWinnings(marketId)`
-- `getMyBet(marketId) -> euint64 handle`
-- `getMyOutcome(marketId) -> euint8 handle`
-- CID anchoring hooks:
-  - `anchorMarketMetadataCID(marketId, cid)`
-  - `anchorResolutionCID(marketId, cid)`
 
-Notes:
-- Uses official FHEVM primitives (`FHE.fromExternal`, `FHE.add`, `FHE.select`, `FHE.allowThis`, `FHE.allow`).
-- Winner payouts are assigned by owner/oracle flow after resolution.
+Useful read helpers exposed by the contract:
+
+- `markets(marketId)`
+- `getMarketDetails(marketId)`
+- `getOutcomeLabels(marketId)`
+- `getMyOutcome(marketId)`
+- `stakeAmounts(marketId, account)`
+- `claimablePayouts(marketId, account)`
+- `hasPosition(marketId, account)`
+- `hasClaimed(marketId, account)`
 
 ## Frontend Scope
 
-`frontend` implements:
+The frontend currently supports:
 
-- Wallet connection via wagmi + RainbowKit
-- `/markets` dashboard with:
-  - market cards
-  - open/resolved status
-  - encrypted volume label
-  - market/resolution CID links
-  - claim CTA for eligible winners
-- `/markets/[id]` bet page with:
-  - YES/NO selection
-  - amount entry
-  - client-side encryption with `@zama-fhe/relayer-sdk`
-  - confidential position confirmation
-  - owner admin controls (resolve + assign payout)
-  - claim flow + Lit response reveal
-- `app/api/filecoin/upload`:
-  - uploads canonical market/resolution JSON payloads to Filecoin via Synapse SDK
-  - returns a real PieceCID for on-chain anchoring
-- `app/api/lit/claim`:
-  - verifies `WinningsClaimed` event data from claim tx receipt
-  - returns verified payout and optional Lit attestation payload
+- wallet connection with wagmi + RainbowKit
+- `/markets` market board
+- `/markets/[id]` market detail page with:
+  - encrypted-side bet placement
+  - optimistic oracle actions
+  - settlement opening
+  - owner payout assignment
+  - direct `claimWinnings()` flow
+- `/create` market creation
+- `/my-bets` portfolio view
+- `/api/lit/claim` optional post-claim verification against the `WinningsClaimed` event
 
 ## Quick Start
 
-### 1) Contracts
+### Contracts
 
 ```bash
 cd /Users/sam/Desktop/Projects/ShieldBet/contracts
@@ -76,7 +85,7 @@ npm install
 npm test
 ```
 
-Deploy:
+Deploy to Sepolia:
 
 ```bash
 cp .env.example .env
@@ -84,26 +93,34 @@ cp .env.example .env
 npm run deploy:zama
 ```
 
-### 2) Frontend
+Run the live Sepolia lifecycle demo:
+
+```bash
+cd /Users/sam/Desktop/Projects/ShieldBet/contracts
+npm run e2e:sepolia
+```
+
+### Frontend
 
 ```bash
 cd /Users/sam/Desktop/Projects/ShieldBet/frontend
 npm install
 cp .env.example .env.local
-# set NEXT_PUBLIC_SHIELDBET_ADDRESS and chain values
+# set NEXT_PUBLIC_SHIELDBET_ADDRESS and chain / fhEVM values
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000)
 
-## Env Configuration
+## Environment Variables
 
-### Contracts (`contracts/.env`)
+### `contracts/.env`
 
 - `ZAMA_RPC_URL`
 - `DEPLOYER_PRIVATE_KEY`
+- `SHIELDBET_ADDRESS` (optional for the Sepolia e2e script)
 
-### Frontend (`frontend/.env.local`)
+### `frontend/.env.local`
 
 - `NEXT_PUBLIC_CHAIN_ID`
 - `NEXT_PUBLIC_CHAIN_NAME`
@@ -118,24 +135,34 @@ Open [http://localhost:3000](http://localhost:3000)
 - `NEXT_PUBLIC_FHEVM_VERIFY_DECRYPTION_CONTRACT`
 - `NEXT_PUBLIC_FHEVM_VERIFY_INPUT_CONTRACT`
 - `NEXT_PUBLIC_FHEVM_GATEWAY_CHAIN_ID`
-- `NEXT_PUBLIC_LIT_ACTION_CID` (optional, enables Lit Action execution in claim flow)
-- `NEXT_PUBLIC_LIT_NETWORK` (optional, default: `naga-test`; supported: `naga-test`, `naga-dev`, `naga-mainnet`, `naga`, `naga-local`, `naga-staging`, `naga-proto`; `datil` is kept as backward-compatible alias to `naga-test`)
-- `FILECOIN_UPLOAD_MODE` (`synapse` or `mock`)
-- `FILECOIN_NETWORK` (`calibration`, `mainnet`, `devnet`)
-- `FILECOIN_RPC_URL` (optional custom RPC URL for selected Filecoin network)
-- `FILECOIN_WALLET_PRIVATE_KEY` (required for `synapse` mode)
-- `FILECOIN_WITH_CDN` (optional, default `false`)
+- `NEXT_PUBLIC_LIT_ACTION_CID` (optional)
+- `NEXT_PUBLIC_LIT_NETWORK` (optional, recommended: `naga-dev`)
 
-## Demo Flow (PRD-aligned)
+## Browser Acceptance Flow
 
-1. Open `/markets`, connect wallet.
-2. Open a market and place an encrypted bet (payload encoded client-side).
-3. Resolve market from owner wallet (`resolveMarket`).
-4. Assign winner payout from owner wallet (`assignWinnerPayout`).
-5. Claim winnings from winner wallet.
-6. Verify anchored CIDs from dashboard links.
+This is the v1 release gate:
 
-## Next Integration Tasks
+1. Create a market from `/create`
+2. Place an encrypted-side bet from `/markets/[id]`
+3. Wait for the market deadline
+4. Propose an outcome with the oracle stake
+5. Optionally challenge during the dispute window
+6. Finalize from the owner wallet after the dispute window
+7. Open settlement data for the relevant bettors
+8. Assign payout manually from the owner wallet
+9. Claim winnings from the winning wallet
+10. Optionally verify the claim receipt through Lit attestation
 
-- Move winner payout assignment from manual admin input to oracle/Lit Action automation.
-- Add explicit Lit Action response schema validation and replay protection.
+## Current Product Truth
+
+- Zama handles **confidential side selection**
+- ETH stake remains **public**
+- Lit is **non-authoritative** in this phase
+- Filecoin is **out of scope** in this phase
+- Settlement remains **owner-administered**
+
+## Next Steps After Stabilization
+
+- move payout assignment from manual owner entry to Lit-assisted automation
+- reduce participation leakage beyond wallet-level on-chain visibility
+- add a stronger decentralized resolution authority if we promote Lit from optional attestation to settlement authority

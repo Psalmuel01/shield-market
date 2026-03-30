@@ -33,8 +33,8 @@ export default function MyBetsPage() {
     return ids.flatMap((marketId) => [
       { ...shieldBetConfig, functionName: "markets" as const, args: [marketId] as const },
       { ...shieldBetConfig, functionName: "hasPosition" as const, args: [marketId, address] as const },
-      { ...shieldBetConfig, functionName: "getClaimQuote" as const, args: [marketId, address] as const },
-      { ...shieldBetConfig, functionName: "getMyOutcome" as const, args: [marketId] as const },
+      { ...shieldBetConfig, functionName: "claimablePayouts" as const, args: [marketId, address] as const },
+      { ...shieldBetConfig, functionName: "getMyOutcome" as const, args: [marketId] as const, account: address },
       { ...shieldBetConfig, functionName: "stakeAmounts" as const, args: [marketId, address] as const },
       { ...shieldBetConfig, functionName: "hasClaimed" as const, args: [marketId, address] as const },
       { ...shieldBetConfig, functionName: "getOutcomeLabels" as const, args: [marketId] as const }
@@ -103,7 +103,7 @@ export default function MyBetsPage() {
     for (let i = 0; i < batch.length; i += 7) {
       const marketRes = batch[i];
       const hasPositionRes = batch[i + 1];
-      const claimRes = batch[i + 2];
+      const claimablePayoutRes = batch[i + 2];
       const stakeRes = batch[i + 4];
       const hasClaimedRes = batch[i + 5];
       const labelsRes = batch[i + 6];
@@ -126,7 +126,8 @@ export default function MyBetsPage() {
       const position = decryptedIdx !== undefined ? labels[decryptedIdx] : "Encrypted";
 
       const stakeWei = BigInt(((stakeRes?.status === "success" ? stakeRes.result : 0n) as bigint) || 0n);
-      const isClaimable = claimRes?.status === "success" ? (claimRes.result as unknown as [bigint, boolean])[1] : false;
+      const claimablePayoutWei = BigInt(((claimablePayoutRes?.status === "success" ? claimablePayoutRes.result : 0n) as bigint) || 0n);
+      const isClaimable = claimablePayoutWei > 0n;
       const hasClaimed = hasClaimedRes?.status === "success" ? Boolean(hasClaimedRes.result) : false;
 
       let status: MyBetRow["status"] = "Open";
@@ -136,6 +137,7 @@ export default function MyBetsPage() {
       else if (market.status === 4) {
         if (hasClaimed) status = "Claimed";
         else if (isClaimable) status = "Won";
+        else if (decryptedIdx !== undefined) status = decryptedIdx === market.outcome ? "Awaiting Payout" : "Lost";
         else status = "Finalized";
       }
 
