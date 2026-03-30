@@ -211,7 +211,7 @@ export default function CreateMarketPage() {
                 </div>
                 <div className="mt-3 grid gap-3">
                   {outcomeLabels.map((label, index) => (
-                    <div key={`${index}-${label}`} className="flex gap-3">
+                    <div key={`outcome-${index}`} className="flex gap-3">
                       <input
                         value={label}
                         onChange={(event) => updateOutcome(index, event.target.value)}
