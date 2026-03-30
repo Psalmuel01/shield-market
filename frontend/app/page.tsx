@@ -192,7 +192,7 @@ export default function Home() {
           z-index: 1;
           max-width: 1280px;
           margin: 0 auto;
-          padding: 0 24px 80px;
+          padding: 0 24px 40px;
         }
 
         /* ── Nav ── */
@@ -201,7 +201,7 @@ export default function Home() {
           align-items: center;
           justify-content: space-between;
           padding: 20px 0 0;
-          margin-bottom: 48px;
+          margin-bottom: 2px;
         }
         .sb-logo {
           display: flex;
@@ -807,7 +807,7 @@ export default function Home() {
 
         <div className="sb-wrap">
           {/* Hero */}
-          <section className="sb-hero">
+          <section className="sb-hero mt-14">
             <div>
               <div className="sb-eyebrow">
                 <span className="sb-eyebrow-dot" />
