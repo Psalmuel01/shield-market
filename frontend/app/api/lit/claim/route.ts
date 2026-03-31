@@ -32,7 +32,7 @@ interface LitAttestationPayload {
 export const runtime = "nodejs";
 
 const winningsClaimedEvent = parseAbiItem(
-  "event WinningsClaimed(uint256 indexed marketId, address indexed winner, uint256 payoutAmount)"
+  "event WinningsClaimed(uint256 indexed marketId, address indexed winner, uint256 payoutAmount, uint8 assetType)"
 );
 
 function getRpcUrl() {

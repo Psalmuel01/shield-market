@@ -16,7 +16,7 @@ export default function MarketsPage() {
             Explore <span className="vm-text-gradient">Markets</span>
           </h1>
           <p className="vm-page-subtitle mt-4">
-            Discover confidential prediction markets built around encrypted position selection. ShieldBet keeps Zama and Lit context intact while adopting a sharper, denser market browsing experience.
+            Browse active and expiring markets, inspect where each one sits in the lifecycle, and move from private bet placement to optimistic resolution and settlement.
           </p>
         </div>
 
@@ -31,8 +31,8 @@ export default function MarketsPage() {
               <span className="font-mono text-sm font-bold text-white dark:text-white">Encrypted side</span>
             </div>
             <div className="flex items-center justify-between rounded-2xl border border-white/6 bg-white/[0.02] px-4 py-3">
-              <span className="text-sm text-[var(--text-muted)]">Settlement</span>
-              <span className="font-mono text-sm font-bold text-white dark:text-white">ETH pool</span>
+              <span className="text-sm text-[var(--text-muted)]">Lifecycle</span>
+              <span className="font-mono text-sm font-bold text-white dark:text-white">Oracle + dispute</span>
             </div>
           </div>
         </div>

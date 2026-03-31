@@ -6,6 +6,7 @@ interface BetPlacementProps {
   selectedOutcome: number;
   outcomeLabels: string[];
   amount: string;
+  assetLabel: string;
   balanceLabel: string;
   alreadyBet: boolean;
   isSubmitting: boolean;
@@ -21,6 +22,7 @@ export function BetPlacement({
   selectedOutcome,
   outcomeLabels,
   amount,
+  assetLabel,
   balanceLabel,
   alreadyBet,
   isSubmitting,
@@ -77,7 +79,7 @@ export function BetPlacement({
       <div>
         <div className="mb-3 flex items-center justify-between">
           <label htmlFor="bet-amount" className="vm-field-label mb-0">
-            Stake Amount (ETH)
+            Stake Amount ({assetLabel})
           </label>
           <span className="text-xs text-white/45">Available: {balanceLabel}</span>
         </div>

@@ -2,18 +2,20 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Calendar, FileText, Plus, Tag, Trash2 } from "lucide-react";
-import { decodeEventLog, parseAbiItem } from "viem";
+import { Calendar, Coins, FileText, Plus, ShieldCheck, Tag, Trash2 } from "lucide-react";
+import { decodeEventLog, parseAbiItem, parseEther, parseUnits } from "viem";
 import { useAccount, usePublicClient, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 import { ActionSuccessModal, type ActionSuccessState } from "@/components/action-success-modal";
+// import { MarketLifecycle } from "@/components/market-lifecycle";
 import { RuntimeAlerts } from "@/components/runtime-alerts";
+import { erc20Abi } from "@/lib/abi";
 import { shieldBetConfig } from "@/lib/contract";
-import { MarketCategory } from "@/lib/market-ui";
+import { MarketAsset, MarketCategory } from "@/lib/market-ui";
 import { getRuntimeDiagnostics } from "@/lib/runtime-config";
 import { logError } from "@/lib/telemetry";
 
 const marketCreatedEvent = parseAbiItem(
-  "event MarketCreated(uint256 indexed marketId, string question, uint256 deadline, address indexed creator, uint8 marketType)"
+  "event MarketCreated(uint256 indexed marketId, string question, uint256 deadline, address indexed creator, uint8 marketType, uint8 assetType, address quoteToken, uint256 minStake, uint256 seedLiquidity)"
 );
 const marketCategories: MarketCategory[] = ["Crypto", "Politics", "Sports", "Science", "Other"];
 
@@ -26,7 +28,12 @@ export default function CreateMarketPage() {
   const [outcomeLabels, setOutcomeLabels] = useState<string[]>(["YES", "NO"]);
   const [category, setCategory] = useState<MarketCategory>("Crypto");
   const [resolutionCriteria, setResolutionCriteria] = useState("");
-  const [resolutionSource, setResolutionSource] = useState("Lit-backed resolution policy");
+  const [resolutionSource, setResolutionSource] = useState("Lit-assisted oracle notes + admin fallback");
+  const [resolutionPolicy, setResolutionPolicy] = useState("Optimistic oracle with admin fallback");
+  const [asset, setAsset] = useState<MarketAsset>("ETH");
+  const [quoteToken, setQuoteToken] = useState(process.env.NEXT_PUBLIC_USDC_ADDRESS || "");
+  const [minStake, setMinStake] = useState("");
+  const [seedLiquidity, setSeedLiquidity] = useState("");
   const [closingDate, setClosingDate] = useState("");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [createdMarketId, setCreatedMarketId] = useState<bigint | null>(null);
@@ -65,6 +72,29 @@ export default function CreateMarketPage() {
       return;
     }
 
+    let parsedMinStake: bigint;
+    let parsedSeedLiquidity: bigint;
+    try {
+      parsedMinStake = minStake.trim()
+        ? asset === "ETH"
+          ? parseEther(minStake.trim())
+          : parseUnits(minStake.trim(), 6)
+        : 0n;
+      parsedSeedLiquidity = seedLiquidity.trim()
+        ? asset === "ETH"
+          ? parseEther(seedLiquidity.trim())
+          : parseUnits(seedLiquidity.trim(), 6)
+        : 0n;
+    } catch (error) {
+      setStatusMessage("Invalid numeric value for min stake or seed liquidity. Use decimals like 0.1 ETH or 50 USDC.");
+      return;
+    }
+
+    if (parsedMinStake < 0n || parsedSeedLiquidity < 0n) {
+      setStatusMessage("Min stake and seed liquidity must be >= 0.");
+      return;
+    }
+
     const deadline = Math.floor(new Date(closingDate).getTime() / 1000);
     if (!Number.isFinite(deadline) || deadline <= Math.floor(Date.now() / 1000)) {
       setStatusMessage("Closing date must be in the future.");
@@ -74,6 +104,21 @@ export default function CreateMarketPage() {
     try {
       setStatusMessage("Creating market on-chain...");
       setCreatedMarketId(null);
+
+      if (asset === "USDC" && !quoteToken.trim()) {
+        throw new Error("USDC markets require a token address.");
+      }
+
+      if (asset === "USDC" && parsedSeedLiquidity > 0n) {
+        setStatusMessage("Approving USDC seed liquidity...");
+        const approvalHash = await writeContractAsync({
+          address: quoteToken as `0x${string}`,
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [shieldBetConfig.address, parsedSeedLiquidity]
+        });
+        await publicClient?.waitForTransactionReceipt({ hash: approvalHash });
+      }
 
       const txHash = await writeContractAsync({
         ...shieldBetConfig,
@@ -85,8 +130,14 @@ export default function CreateMarketPage() {
           outcomeLabels.map((item) => item.trim()),
           category,
           resolutionCriteria.trim(),
-          resolutionSource.trim()
-        ]
+          resolutionSource.trim(),
+          resolutionPolicy.trim(),
+          asset === "USDC" ? 1 : 0,
+          asset === "USDC" ? (quoteToken as `0x${string}`) : "0x0000000000000000000000000000000000000000",
+          parsedMinStake,
+          parsedSeedLiquidity
+        ],
+        value: asset === "ETH" ? parsedSeedLiquidity : 0n
       });
 
       const receipt = await publicClient?.waitForTransactionReceipt({ hash: txHash });
@@ -141,7 +192,7 @@ export default function CreateMarketPage() {
             Launch Your <span className="vm-text-gradient">Prediction</span>
           </h1>
           <p className="vm-page-subtitle mx-auto mt-4">
-            Create a clear market, define the outcomes, set the expiry, and publish it into the owner-driven v1 resolution flow.
+            Create a clear market, choose the stake asset, set the market rules, and launch it into the full optimistic oracle lifecycle.
           </p>
         </div>
 
@@ -272,8 +323,79 @@ export default function CreateMarketPage() {
                   value={resolutionSource}
                   onChange={(event) => setResolutionSource(event.target.value)}
                   className="vm-input"
-                  placeholder="Lit-backed resolution policy"
+                  placeholder="Lit-assisted oracle notes + admin fallback"
                 />
+              </div>
+
+              <div>
+                <label className="vm-field-label">
+                  <ShieldCheck className="h-3.5 w-3.5 text-[var(--primary)]" />
+                  Resolution Policy
+                </label>
+                <input
+                  value={resolutionPolicy}
+                  onChange={(event) => setResolutionPolicy(event.target.value)}
+                  className="vm-input"
+                  placeholder="Optimistic oracle with admin fallback"
+                />
+              </div>
+
+              <div className="grid gap-5 md:grid-cols-2">
+                <div>
+                  <label className="vm-field-label">
+                    <Coins className="h-3.5 w-3.5 text-[var(--primary)]" />
+                    Quote Asset
+                  </label>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {(["ETH", "USDC"] as MarketAsset[]).map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => setAsset(option)}
+                        className={`vm-soft-btn justify-center py-4 ${asset === option ? "border-[var(--primary)]/24 bg-[var(--primary)]/12 text-[var(--primary)]" : ""}`}
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="vm-field-label">Minimum Stake</label>
+                  <input
+                    value={minStake}
+                    onChange={(event) => setMinStake(event.target.value)}
+                    className="vm-input"
+                    placeholder={asset === "ETH" ? "0.1" : "50"}
+                  />
+                  <p className="vm-note mt-2">
+                    Enter in human units: ETH (e.g., 0.1) or USDC (e.g., 50). Values are converted to wei/base units for on-chain submission.
+                  </p>
+                </div>
+              </div>
+
+              {asset === "USDC" ? (
+                <div>
+                  <label className="vm-field-label">USDC Token Address</label>
+                  <input
+                    value={quoteToken}
+                    onChange={(event) => setQuoteToken(event.target.value)}
+                    className="vm-input"
+                    placeholder="0x..."
+                  />
+                </div>
+              ) : null}
+
+              <div>
+                <label className="vm-field-label">Seed Liquidity</label>
+                <input
+                  value={seedLiquidity}
+                  onChange={(event) => setSeedLiquidity(event.target.value)}
+                  className="vm-input"
+                  placeholder={asset === "ETH" ? "0.25" : "100"}
+                />
+                <p className="vm-note mt-2">
+                  Seed liquidity is initial funding the market maker provides for trading depth. Enter as human units: ETH (e.g., 0.25) or USDC (e.g., 100).
+                </p>
               </div>
             </div>
 
@@ -294,6 +416,14 @@ export default function CreateMarketPage() {
                       <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">Category</div>
                       <div className="mt-2 text-sm text-white/82">{category}</div>
                     </div>
+                    <div>
+                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">Accepted Token</div>
+                      <div className="mt-2 text-sm text-white/82">{asset}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">Settlement Model</div>
+                      <div className="mt-2 text-sm text-white/82">{resolutionPolicy || "Optimistic oracle with admin fallback"}</div>
+                    </div>
                   </div>
                   <div>
                     <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">Outcomes</div>
@@ -309,16 +439,36 @@ export default function CreateMarketPage() {
                     <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">Resolution Source</div>
                     <div className="mt-2 text-sm text-white/82">{resolutionSource || "Not provided"}</div>
                   </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">Min Stake</div>
+                      <div className="mt-2 text-sm text-white/82">{minStake || "0"}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">Seed Liquidity</div>
+                      <div className="mt-2 text-sm text-white/82">{seedLiquidity || "0"}</div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
               <div className="rounded-[1.75rem] border border-[var(--primary)]/14 bg-[var(--primary)]/7 p-6">
                 <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--primary)]">Execution Model</div>
                 <ul className="mt-4 space-y-3 text-sm leading-7 text-white/72">
-                  <li>Stake is public ETH for honest v1 settlement.</li>
+                  <li>Each market can settle in ETH or USDC.</li>
                   <li>Outcome selection is encrypted before submission via Zama tooling.</li>
-                  <li>Claim and verification flows remain aligned with your Lit integration path.</li>
+                  <li>Resolution follows an optimistic oracle flow with proposal, challenge, and automatic or admin finalization paths.</li>
                 </ul>
+              </div>
+
+              <div className="rounded-[1.75rem] border border-white/6 bg-white/[0.03] p-6">
+                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--primary)]">Lifecycle Preview</div>
+                <p className="mt-3 text-sm leading-7 text-white/68">
+                  Every market you create will move through the same lifecycle before claims become available.
+                </p>
+                {/* <div className="mt-5">
+                  <MarketLifecycle currentStatus="Active" compact />
+                </div> */}
               </div>
 
               <button

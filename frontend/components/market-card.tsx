@@ -2,10 +2,10 @@
 
 import { CheckCircle2, ChevronRight, Clock, Users } from "lucide-react";
 import { useMemo } from "react";
-import { formatEther } from "viem";
+import { formatEther, formatUnits } from "viem";
 import { InteractiveLink } from "@/components/interactive-link";
 import { cidToExplorer, formatDeadline, getCountdown } from "@/lib/format";
-import { getEncryptedBandCount, getMarketStatus, getMarketType, MarketCategory, renderEncryptedDots } from "@/lib/market-ui";
+import { getEncryptedBandCount, getMarketAsset, getMarketStatus, getMarketStatusBlurb, getMarketType, MarketCategory, renderEncryptedDots } from "@/lib/market-ui";
 
 interface MarketCardProps {
   marketId: bigint;
@@ -14,6 +14,7 @@ interface MarketCardProps {
   outcome: number;
   status: number;
   marketType: number;
+  assetType: number;
   category: MarketCategory;
   metadataCid: string;
   resolutionCid: string;
@@ -43,6 +44,7 @@ export function MarketCard({
   outcome,
   status: rawStatus,
   marketType: rawType,
+  assetType,
   category,
   metadataCid,
   resolutionCid,
@@ -50,9 +52,11 @@ export function MarketCard({
 }: MarketCardProps) {
   const status = getMarketStatus(rawStatus, deadline);
   const marketType = getMarketType(rawType);
+  const asset = getMarketAsset(assetType);
   const bandCount = useMemo(() => getEncryptedBandCount(marketId), [marketId]);
   const bandText = renderEncryptedDots(bandCount);
   const closingLabel = status === "Active" ? getCountdown(deadline) : formatDeadline(deadline);
+  const statusBlurb = getMarketStatusBlurb(status);
 
   return (
     <div className="vm-card vm-card--interactive flex h-full min-h-[22rem] flex-col">
@@ -72,11 +76,11 @@ export function MarketCard({
           <h2 className="vm-card__title transition-colors hover:text-[var(--primary)]">{question}</h2>
         </InteractiveLink>
         <p className="vm-card__description">
-          Confidential activity remains abstracted while the market is live. Open the detail view to place an encrypted side selection or inspect resolution state.
+          {statusBlurb || "Confidential activity remains abstracted while the market is live. Open the detail view to place an encrypted side selection or inspect resolution state."}
         </p>
         <div className="mt-6 text-[11px] font-bold uppercase tracking-[0.18em] text-white/35">Pool</div>
         <div className="mt-2 font-mono text-2xl font-bold text-white dark:text-white">
-          {Number(formatEther(poolBalanceWei)).toFixed(4)} ETH
+          {asset === "ETH" ? `${Number(formatEther(poolBalanceWei)).toFixed(4)} ETH` : `${Number(formatUnits(poolBalanceWei, 6)).toFixed(2)} USDC`}
         </div>
       </div>
 

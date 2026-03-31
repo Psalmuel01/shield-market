@@ -18,6 +18,7 @@ interface ParsedMarket {
   outcome: number;
   status: number;
   marketType: number;
+  assetType: number;
   creator: `0x${string}`;
   metadataCid: string;
   resolutionCid: string;
@@ -89,6 +90,7 @@ export function MarketsDashboard() {
         outcome: market.outcome,
         status: market.status,
         marketType: market.marketType,
+        assetType: market.assetType,
         creator: market.creator,
         metadataCid: metadataRes?.status === "success" && metadataRes.result ? String(metadataRes.result) : "",
         resolutionCid: resolutionRes?.status === "success" && resolutionRes.result ? String(resolutionRes.result) : "",
@@ -138,7 +140,7 @@ export function MarketsDashboard() {
     return (
       <div className="vm-card p-12 text-center">
         <div className="mx-auto h-12 w-12 animate-spin rounded-full border-2 border-[var(--primary)] border-t-transparent" />
-        <p className="mt-4 text-base font-semibold text-white/72">Fetching markets from the confidential execution layer...</p>
+        <p className="mt-4 text-base font-semibold text-white/72">Loading markets and lifecycle state from the confidential execution layer...</p>
       </div>
     );
   }

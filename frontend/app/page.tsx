@@ -543,7 +543,7 @@ export default function Home() {
         /* ── Steps ── */
         .sb-steps-grid {
           display: grid;
-          grid-template-columns: repeat(3, 1fr);
+          grid-template-columns: repeat(5, 1fr);
           gap: 1px;
           background: var(--border);
           border: 1px solid var(--border);
@@ -811,19 +811,19 @@ export default function Home() {
             <div>
               <div className="sb-eyebrow">
                 <span className="sb-eyebrow-dot" />
-                Zama fhEVM · Lit Protocol
+                Zama fhEVM · Optimistic Oracle v1
               </div>
 
               <h1 className="sb-h1">
                 Bet with a{" "}
                 <span className="sb-h1-teal">
-                  <h1>confidential</h1>
+                  <p>confidential</p>
                 </span>
                 {" "}core.
               </h1>
 
               <p className="sb-hero-sub">
-                Your directional conviction stays encrypted on-chain. ShieldBet hides which outcome you chose while keeping stakes, pools, and payouts fully verifiable — no oracle trust required.
+                ShieldBet is a private prediction market where your side selection is encrypted on-chain, your stake is public in ETH, and every market moves through a real proposal, challenge, finalization, and claim lifecycle.
               </p>
 
               <div className="sb-btn-row">
@@ -872,10 +872,10 @@ export default function Home() {
                 <div><span className="sb-term-key">pool_yes</span>       <span className="sb-term-val-enc">euint64(0x██)</span> <span className="sb-term-comment">// encrypted</span></div>
                 <div><span className="sb-term-key">pool_no</span>        <span className="sb-term-val-enc">euint64(0x██)</span> <span className="sb-term-comment">// encrypted</span></div>
                 <hr className="sb-term-divider" />
-                <div><span className="sb-term-key">resolver</span>       <span className="sb-term-val-pub">Lit PKP</span></div>
-                <div><span className="sb-term-key">claim_auth</span>     <span className="sb-term-val-pub">EIP-712 sig</span></div>
-                <div><span className="sb-term-key">nullifier</span>      <span className="sb-term-val-pub">0x7c4a…f901</span></div>
-                <div><span className="sb-term-key">double_claim</span>   <span style={{ color: "#f87171" }}>false</span></div>
+                <div><span className="sb-term-key">proposal</span>       <span className="sb-term-val-pub">oracle stake posted</span></div>
+                <div><span className="sb-term-key">challenge</span>      <span className="sb-term-val-pub">open during dispute window</span></div>
+                <div><span className="sb-term-key">finalization</span>   <span className="sb-term-val-pub">owner locks outcome</span></div>
+                <div><span className="sb-term-key">claim_path</span>     <span className="sb-term-val-pub">manual payout → claim</span></div>
               </div>
               <div className="sb-term-row">
                 <span className="sb-term-badge enc">
@@ -896,20 +896,32 @@ export default function Home() {
               {
                 num: "Step 01",
                 icon: <Shield style={{ width: 22, height: 22 }} />,
-                title: "Browse without signal leakage",
-                body: "Market pools show aggregate encrypted totals. No visible order book, no directional feed. Other traders cannot read your position.",
+                title: "Connect your wallet",
+                body: "Use a supported wallet to create markets, place positions, propose outcomes, or claim rewards through the same account.",
               },
               {
                 num: "Step 02",
                 icon: <Lock style={{ width: 22, height: 22 }} />,
-                title: "Encrypt your side on-device",
-                body: "Zama fhEVM encrypts your YES or NO choice client-side before it reaches the contract. Your conviction never appears in plaintext on-chain.",
+                title: "Create a market",
+                body: "Define the question, category, market type, outcomes, expiry, and resolution criteria before publishing the market on-chain.",
               },
               {
                 num: "Step 03",
+                icon: <EyeOff style={{ width: 22, height: 22 }} />,
+                title: "Place a private position",
+                body: "Your side is encrypted client-side with Zama fhEVM before submission, while your ETH stake is escrowed publicly in the pool.",
+              },
+              {
+                num: "Step 04",
                 icon: <Gavel style={{ width: 22, height: 22 }} />,
-                title: "Claim through a verified path",
-                body: "Post-resolution, a Lit-signed attestation confirms you bet on the winning side. Payout math runs on-chain from your public stake.",
+                title: "Resolve with proposal and challenge",
+                body: "After expiry, an oracle proposes the result, challengers can dispute it, and the market moves through an explicit dispute window before finalization.",
+              },
+              {
+                num: "Step 05",
+                icon: <CheckCircle2 style={{ width: 22, height: 22 }} />,
+                title: "Claim rewards",
+                body: "Once the owner finalizes and assigns payout, the winning wallet claims from the market contract and can optionally verify the claim through Lit.",
               },
             ].map((s) => (
               <div key={s.num} className="sb-step">
@@ -927,22 +939,22 @@ export default function Home() {
               <div className="sb-feature-icon teal">
                 <EyeOff style={{ width: 22, height: 22 }} />
               </div>
-              <h3>No readable order book</h3>
-              <p>Aggregate pool sizes are encrypted until resolution. Traders cannot front-run your position by reading your directional intent.</p>
+              <h3>Private positions</h3>
+              <p>Your directional side is encrypted on-chain. Other traders cannot read whether you are on YES, NO, or any categorical branch.</p>
             </div>
 
             <div className="sb-bento-cell">
               <div className="sb-feature-icon blue">
                 <CheckCircle2 style={{ width: 22, height: 22 }} />
               </div>
-              <h3>Honest trust boundaries</h3>
-              <p>ETH stake is public, choice is private. The product copy reflects the actual trust model — not a hand-wavy "fully private" claim.</p>
+              <h3>Binary and categorical markets</h3>
+              <p>Create simple yes/no markets or multi-outcome markets with several possible resolutions under the same lifecycle.</p>
             </div>
 
             <div className="sb-bento-cell wide">
               <div className="sb-bento-wide-left">
-                <h2>Built on a real protocol stack.</h2>
-                <p>ShieldBet combines encrypted compute, programmable authorization, and on-chain settlement into one coherent product. Each layer does exactly one job.</p>
+                <h2>Built around one coherent market lifecycle.</h2>
+                <p>Connect, create, place a private position, move through optimistic resolution, and claim rewards. Each surface in the app now follows that same sequence.</p>
                 <div className="sb-btn-row" style={{ marginBottom: 0 }}>
                   <InteractiveLink href="/markets" className="sb-btn-primary">
                     See live markets <ArrowRight style={{ width: 15, height: 15 }} />
@@ -952,9 +964,9 @@ export default function Home() {
               <div className="sb-stack-list">
                 {[
                   { dot: "teal", label: "Zama fhEVM", role: "Encrypted compute" },
-                  { dot: "blue", label: "Lit Protocol", role: "Decentralized signing" },
-                  { dot: "teal", label: "EIP-712", role: "Typed claim auth" },
-                  { dot: "blue", label: "IPFS", role: "Metadata anchoring" },
+                  { dot: "blue", label: "Optimistic Oracle", role: "Proposal + challenge" },
+                  { dot: "teal", label: "Owner Finalization", role: "Settled outcome" },
+                  { dot: "blue", label: "Lit Protocol", role: "Optional claim attestation" },
                   { dot: "teal", label: "RainbowKit", role: "Wallet UX" },
                 ].map((item) => (
                   <div key={item.label} className="sb-stack-item">
@@ -970,16 +982,16 @@ export default function Home() {
               <div className="sb-feature-icon teal">
                 <Zap style={{ width: 22, height: 22 }} />
               </div>
-              <h3>PKP-ready resolution</h3>
-              <p>Market resolution is signed by a designated key. The contract already accepts PKP signatures — the Lit Action is the next drop-in.</p>
+              <h3>Optimistic resolution</h3>
+              <p>Markets move from active to expired, proposed, disputed, and finalized. Proposal and challenge both require staking to discourage bad resolution behavior.</p>
             </div>
 
             <div className="sb-bento-cell">
               <div className="sb-feature-icon blue">
                 <Shield style={{ width: 22, height: 22 }} />
               </div>
-              <h3>Double-claim protection</h3>
-              <p>A nullifier mapping and EIP-712 deadline binding prevent replay. Claims are atomic — either the full payout or a clean revert.</p>
+              <h3>Claim after settlement</h3>
+              <p>Once the market is finalized and payout is assigned, the winner claims directly from the contract. Your own side is visible to you in the dashboard.</p>
             </div>
           </div>
 

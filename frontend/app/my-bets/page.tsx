@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Trophy, Wallet } from "lucide-react";
-import { getAddress } from "viem";
+import { formatEther, formatUnits, getAddress } from "viem";
 import { useAccount, useReadContract, useReadContracts, useWalletClient } from "wagmi";
 import { MyBetRow, MyBetsTable } from "@/components/my-bets-table";
 import { shieldBetConfig } from "@/lib/contract";
 import { decryptUserHandles } from "@/lib/encryption";
-import { decodeMarketView } from "@/lib/market-contract";
+import { decodeMarketDetails, decodeMarketView } from "@/lib/market-contract";
+import { getMarketAsset } from "@/lib/market-ui";
 import { logWarn } from "@/lib/telemetry";
 
 export default function MyBetsPage() {
@@ -33,8 +34,8 @@ export default function MyBetsPage() {
 
     return ids.flatMap((marketId) => [
       { ...shieldBetConfig, functionName: "markets" as const, args: [marketId] as const },
+      { ...shieldBetConfig, functionName: "getMarketDetails" as const, args: [marketId] as const },
       { ...shieldBetConfig, functionName: "hasPosition" as const, args: [marketId, address] as const },
-      { ...shieldBetConfig, functionName: "claimablePayouts" as const, args: [marketId, address] as const },
       { ...shieldBetConfig, functionName: "getBetOutcomeHandle" as const, args: [marketId, address] as const },
       { ...shieldBetConfig, functionName: "stakeAmounts" as const, args: [marketId, address] as const },
       { ...shieldBetConfig, functionName: "hasClaimed" as const, args: [marketId, address] as const },
@@ -59,7 +60,7 @@ export default function MyBetsPage() {
       const handles: { marketId: bigint; handle: `0x${string}` }[] = [];
 
       for (let i = 0; i < batchResults.length; i += 7) {
-        const hasPositionRes = batchResults[i + 1];
+        const hasPositionRes = batchResults[i + 2];
         const outcomeRes = batchResults[i + 3];
         const marketId = ids[i / 7];
 
@@ -111,8 +112,8 @@ export default function MyBetsPage() {
     const next: MyBetRow[] = [];
     for (let i = 0; i < batch.length; i += 7) {
       const marketRes = batch[i];
-      const hasPositionRes = batch[i + 1];
-      const claimablePayoutRes = batch[i + 2];
+      const detailsRes = batch[i + 1];
+      const hasPositionRes = batch[i + 2];
       const stakeRes = batch[i + 4];
       const hasClaimedRes = batch[i + 5];
       const labelsRes = batch[i + 6];
@@ -128,6 +129,7 @@ export default function MyBetsPage() {
       }
 
       const market = decodeMarketView(marketRes.result);
+      const details = detailsRes?.status === "success" ? decodeMarketDetails(detailsRes.result) : null;
       if (!market) continue;
 
       const labels = (labelsRes?.status === "success" ? (labelsRes.result as string[]) : []) || ["YES", "NO"];
@@ -135,9 +137,18 @@ export default function MyBetsPage() {
       const position = decryptedIdx !== undefined ? labels[decryptedIdx] : failedRecoveries[marketId.toString()] ? "Unavailable" : "Decrypting...";
 
       const stakeWei = BigInt(((stakeRes?.status === "success" ? stakeRes.result : 0n) as bigint) || 0n);
-      const claimablePayoutWei = BigInt(((claimablePayoutRes?.status === "success" ? claimablePayoutRes.result : 0n) as bigint) || 0n);
-      const isClaimable = claimablePayoutWei > 0n;
       const hasClaimed = hasClaimedRes?.status === "success" ? Boolean(hasClaimedRes.result) : false;
+      const asset = getMarketAsset(market.assetType);
+      const amountLabel =
+        asset === "ETH"
+          ? `${Number(formatEther(stakeWei)).toFixed(4)} ETH`
+          : `${Number(formatUnits(stakeWei, 6)).toFixed(2)} USDC`;
+      const isClaimable = Boolean(
+        details?.winningTotalIsPublished &&
+          decryptedIdx !== undefined &&
+          decryptedIdx === market.outcome &&
+          !hasClaimed
+      );
 
       let status: MyBetRow["status"] = "Open";
       if (market.status === 1) status = "Awaiting Resolution";
@@ -146,7 +157,7 @@ export default function MyBetsPage() {
       else if (market.status === 4) {
         if (hasClaimed) status = "Claimed";
         else if (isClaimable) status = "Won";
-        else if (decryptedIdx !== undefined) status = decryptedIdx === market.outcome ? "Awaiting Payout" : "Lost";
+        else if (decryptedIdx !== undefined) status = decryptedIdx === market.outcome ? "Finalized" : "Lost";
         else status = "Finalized";
       }
 
@@ -154,7 +165,7 @@ export default function MyBetsPage() {
         marketId,
         question: market.question,
         position,
-        amountWei: stakeWei.toString(),
+        amountLabel,
         status,
         canClaim: isClaimable && !hasClaimed,
         claimType: "winnings"

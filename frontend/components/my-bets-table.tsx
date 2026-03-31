@@ -1,13 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { formatEther } from "viem";
-
 export interface MyBetRow {
   marketId: bigint;
   question: string;
   position: string;
-  amountWei: string;
+  amountLabel: string;
   status:
     | "Open"
     | "Awaiting Resolution"
@@ -25,10 +23,6 @@ export interface MyBetRow {
 
 interface MyBetsTableProps {
   rows: MyBetRow[];
-}
-
-function formatEthValue(valueWei: string) {
-  return `${Number(formatEther(BigInt(valueWei || "0"))).toFixed(4)} ETH`;
 }
 
 function statusClass(status: MyBetRow["status"]) {
@@ -95,7 +89,7 @@ export function MyBetsTable({ rows }: MyBetsTableProps) {
                     {row.position}
                   </span>
                 </td>
-                <td className="font-mono text-sm font-bold text-white">{formatEthValue(row.amountWei)}</td>
+                <td className="font-mono text-sm font-bold text-white">{row.amountLabel}</td>
                 <td>
                   <span className={`inline-flex rounded-full border px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.16em] ${statusClass(row.status)}`}>
                     {row.status}

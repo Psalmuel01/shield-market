@@ -26,6 +26,8 @@ export function getRuntimeDiagnostics(): RuntimeDiagnostic[] {
   const useCustomFhevm = process.env.NEXT_PUBLIC_FHEVM_USE_CUSTOM === "true";
   const litActionCid = process.env.NEXT_PUBLIC_LIT_ACTION_CID;
   const litNetwork = process.env.NEXT_PUBLIC_LIT_NETWORK || "naga-dev";
+  const settlementSignerKey = process.env.NEXT_PUBLIC_SETTLEMENT_SIGNER_PRIVATE_KEY || process.env.NEXT_PUBLIC_DEPLOYER_PRIVATE_KEY;
+  const usdcAddress = process.env.NEXT_PUBLIC_USDC_ADDRESS;
 
   if (!address) {
     diagnostics.push({
@@ -66,6 +68,20 @@ export function getRuntimeDiagnostics(): RuntimeDiagnostic[] {
     diagnostics.push({
       severity: "warning",
       message: `NEXT_PUBLIC_LIT_NETWORK is set to ${litNetwork}. On this machine, naga-dev is the verified working network for Lit handshakes.`
+    });
+  }
+
+  if (!settlementSignerKey) {
+    diagnostics.push({
+      severity: "warning",
+      message: "Missing NEXT_PUBLIC_SETTLEMENT_SIGNER_PRIVATE_KEY. Automatic claims will not be attestable from the frontend server."
+    });
+  }
+
+  if (!usdcAddress) {
+    diagnostics.push({
+      severity: "warning",
+      message: "Missing NEXT_PUBLIC_USDC_ADDRESS. Users can still create ETH markets, but USDC market creation will require entering a token address manually."
     });
   }
 
