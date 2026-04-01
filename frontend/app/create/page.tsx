@@ -8,7 +8,6 @@ import { useAccount, usePublicClient, useWaitForTransactionReceipt, useWriteCont
 import { ActionSuccessModal, type ActionSuccessState } from "@/components/action-success-modal";
 // import { MarketLifecycle } from "@/components/market-lifecycle";
 import { RuntimeAlerts } from "@/components/runtime-alerts";
-import { erc20Abi } from "@/lib/abi";
 import { shieldBetConfig } from "@/lib/contract";
 import { formatDeadline, getCountdown, truncateErrorMessage } from "@/lib/format";
 import { MarketAsset, MarketCategory } from "@/lib/market-ui";
@@ -16,7 +15,7 @@ import { getRuntimeDiagnostics } from "@/lib/runtime-config";
 import { logError } from "@/lib/telemetry";
 
 const marketCreatedEvent = parseAbiItem(
-  "event MarketCreated(uint256 indexed marketId, string question, uint256 deadline, address indexed creator, uint8 marketType, uint8 assetType, address quoteToken, uint256 minStake, uint256 seedLiquidity)"
+  "event MarketCreated(uint256 indexed marketId, string question, uint256 deadline, address indexed creator, uint8 marketType, uint8 assetType, address quoteToken, uint256 minStake)"
 );
 const marketCategories: MarketCategory[] = ["Crypto", "Politics", "Sports", "Science", "Other"];
 
@@ -29,12 +28,11 @@ export default function CreateMarketPage() {
   const [outcomeLabels, setOutcomeLabels] = useState<string[]>(["YES", "NO"]);
   const [category, setCategory] = useState<MarketCategory>("Crypto");
   const [resolutionCriteria, setResolutionCriteria] = useState("");
-  const [resolutionSource, setResolutionSource] = useState("Lit-assisted oracle notes + admin fallback");
-  const [resolutionPolicy, setResolutionPolicy] = useState("Optimistic oracle with admin fallback");
+  const [resolutionSource, setResolutionSource] = useState("");
+  const [resolutionPolicy, setResolutionPolicy] = useState("Optimistic oracle notes");
   const [asset, setAsset] = useState<MarketAsset>("ETH");
   const [quoteToken, setQuoteToken] = useState(process.env.NEXT_PUBLIC_USDC_ADDRESS || "");
   const [minStake, setMinStake] = useState("");
-  const [seedLiquidity, setSeedLiquidity] = useState("");
   const [closingDate, setClosingDate] = useState("");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isErrorMessage, setIsErrorMessage] = useState(false);
@@ -78,26 +76,20 @@ export default function CreateMarketPage() {
     }
 
     let parsedMinStake: bigint;
-    let parsedSeedLiquidity: bigint;
     try {
       parsedMinStake = minStake.trim()
         ? asset === "ETH"
           ? parseEther(minStake.trim())
           : parseUnits(minStake.trim(), 6)
         : 0n;
-      parsedSeedLiquidity = seedLiquidity.trim()
-        ? asset === "ETH"
-          ? parseEther(seedLiquidity.trim())
-          : parseUnits(seedLiquidity.trim(), 6)
-        : 0n;
     } catch (error) {
-      setStatusMessage("Invalid numeric value for min stake or seed liquidity. Use decimals like 0.1 ETH or 50 USDC.");
+      setStatusMessage("Invalid numeric value for min stake. Use decimals like 0.1 ETH or 50 USDC.");
       setIsErrorMessage(true);
       return;
     }
 
-    if (parsedMinStake < 0n || parsedSeedLiquidity < 0n) {
-      setStatusMessage("Min stake and seed liquidity must be >= 0.");
+    if (parsedMinStake < 0n) {
+      setStatusMessage("Min stake must be >= 0.");
       setIsErrorMessage(true);
       return;
     }
@@ -118,19 +110,6 @@ export default function CreateMarketPage() {
         throw new Error("USDC markets require a token address.");
       }
 
-      if (asset === "USDC" && parsedSeedLiquidity > 0n) {
-        setStatusMessage("Approving USDC seed liquidity...");
-        setIsErrorMessage(false);
-        setIsErrorMessage(false);
-        const approvalHash = await writeContractAsync({
-          address: quoteToken as `0x${string}`,
-          abi: erc20Abi,
-          functionName: "approve",
-          args: [shieldBetConfig.address, parsedSeedLiquidity]
-        });
-        await publicClient?.waitForTransactionReceipt({ hash: approvalHash });
-      }
-
       const txHash = await writeContractAsync({
         ...shieldBetConfig,
         functionName: "createMarketWithMetadata",
@@ -145,10 +124,9 @@ export default function CreateMarketPage() {
           resolutionPolicy.trim(),
           asset === "USDC" ? 1 : 0,
           asset === "USDC" ? (quoteToken as `0x${string}`) : "0x0000000000000000000000000000000000000000",
-          parsedMinStake,
-          parsedSeedLiquidity
+          parsedMinStake
         ],
-        value: asset === "ETH" ? parsedSeedLiquidity : 0n
+        value: 0n
       });
 
       const receipt = await publicClient?.waitForTransactionReceipt({ hash: txHash });
@@ -343,7 +321,7 @@ export default function CreateMarketPage() {
                   value={resolutionSource}
                   onChange={(event) => setResolutionSource(event.target.value)}
                   className="vm-input"
-                  placeholder="Lit-assisted oracle notes + admin fallback"
+                  placeholder="Lit-assisted oracle notes"
                 />
               </div>
 
@@ -355,8 +333,9 @@ export default function CreateMarketPage() {
                 <input
                   value={resolutionPolicy}
                   onChange={(event) => setResolutionPolicy(event.target.value)}
-                  className="vm-input"
-                  placeholder="Optimistic oracle with admin fallback"
+                  className="vm-input text-gray-400!"
+                  placeholder="Optimistic oracle"
+                  disabled
                 />
               </div>
 
@@ -389,7 +368,7 @@ export default function CreateMarketPage() {
                     value={minStake}
                     onChange={(event) => setMinStake(event.target.value)}
                     className="vm-input"
-                    placeholder={asset === "ETH" ? "0.1" : "50"}
+                    placeholder={asset === "ETH" ? "0.005" : "1"}
                   />
                   <p className="vm-note mt-2">
                     Enter in human units: ETH (e.g., 0.1) or USDC (e.g., 50). Values are converted to wei/base units for on-chain submission.
@@ -403,24 +382,13 @@ export default function CreateMarketPage() {
                   <input
                     value={quoteToken}
                     onChange={(event) => setQuoteToken(event.target.value)}
-                    className="vm-input"
+                    className="vm-input text-gray-400!"
                     placeholder="0x..."
+                    disabled
                   />
                 </div>
               ) : null}
 
-              <div>
-                <label className="vm-field-label">Seed Liquidity</label>
-                <input
-                  value={seedLiquidity}
-                  onChange={(event) => setSeedLiquidity(event.target.value)}
-                  className="vm-input"
-                  placeholder={asset === "ETH" ? "0.25" : "100"}
-                />
-                <p className="vm-note mt-2">
-                  Seed liquidity is initial funding the market maker provides for trading depth. Enter as human units: ETH (e.g., 0.25) or USDC (e.g., 100).
-                </p>
-              </div>
             </div>
 
             <div className="space-y-5">
@@ -463,15 +431,9 @@ export default function CreateMarketPage() {
                     <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">Resolution Source</div>
                     <div className="mt-2 text-sm text-white/82">{resolutionSource || "Not provided"}</div>
                   </div>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">Min Stake</div>
-                      <div className="mt-2 text-sm text-white/82">{minStake || "0"}</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">Seed Liquidity</div>
-                      <div className="mt-2 text-sm text-white/82">{seedLiquidity || "0"}</div>
-                    </div>
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/35">Min Stake</div>
+                    <div className="mt-2 text-sm text-white/82">{minStake || "0"}</div>
                   </div>
                 </div>
               </div>
@@ -481,6 +443,7 @@ export default function CreateMarketPage() {
                 <ul className="mt-4 space-y-3 text-sm leading-7 text-white/72">
                   <li>Each market can settle in ETH or USDC.</li>
                   <li>Outcome selection is encrypted before submission via Zama tooling.</li>
+                  <li>Winner payouts come only from the actual public stake pool; there is no extra seeded liquidity layer.</li>
                   <li>Resolution follows an optimistic oracle flow with proposal, challenge, and automatic or admin finalization paths.</li>
                 </ul>
               </div>

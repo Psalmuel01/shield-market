@@ -47,7 +47,6 @@ contract ShieldBet is ZamaEthereumConfig, Ownable {
         AssetType assetType;
         address quoteToken;
         uint256 minStake;
-        uint256 seedLiquidity;
         address creator;
         uint256 disputeWindowEnd;
         uint8 proposedOutcome;
@@ -79,6 +78,7 @@ contract ShieldBet is ZamaEthereumConfig, Ownable {
     mapping(uint256 => bool) public winningTotalPublished;
     mapping(uint256 => bool) public marketFeeRecorded;
     mapping(uint256 => uint256) public marketFeeAmount;
+    mapping(uint256 => uint256) public claimedPayouts;
     mapping(uint256 => string) public marketMetadataCID;
     mapping(uint256 => string) public marketResolutionCID;
 
@@ -94,8 +94,7 @@ contract ShieldBet is ZamaEthereumConfig, Ownable {
         MarketType marketType,
         AssetType assetType,
         address quoteToken,
-        uint256 minStake,
-        uint256 seedLiquidity
+        uint256 minStake
     );
     event BetPlaced(uint256 indexed marketId, address indexed bettor, bytes32 encOutcomeHandle, uint256 stakeAmount);
     event OutcomeProposed(uint256 indexed marketId, uint8 outcome, address indexed proposer);
@@ -154,19 +153,17 @@ contract ShieldBet is ZamaEthereumConfig, Ownable {
         string calldata resolutionPolicy,
         AssetType assetType,
         address quoteToken,
-        uint256 minStake,
-        uint256 seedLiquidity
+        uint256 minStake
     ) external payable returns (uint256 marketId) {
         if (deadline <= block.timestamp) revert DeadlineMustBeFuture();
         if (marketType == MarketType.Binary && outcomeLabels.length != 2) revert InvalidOutcome();
         if (marketType == MarketType.Categorical && outcomeLabels.length < 2) revert InvalidOutcome();
         if (assetType == AssetType.ETH) {
             if (quoteToken != address(0)) revert InvalidQuoteToken();
-            if (msg.value != seedLiquidity) revert InvalidStakeAmount();
+            if (msg.value != 0) revert InvalidStakeAmount();
         } else if (assetType == AssetType.ERC20) {
             if (quoteToken == address(0)) revert InvalidQuoteToken();
             if (msg.value != 0) revert WrongPaymentAsset();
-            if (seedLiquidity > 0) _safeTransferFrom(quoteToken, msg.sender, address(this), seedLiquidity);
         } else {
             revert UnsupportedAsset();
         }
@@ -180,7 +177,6 @@ contract ShieldBet is ZamaEthereumConfig, Ownable {
         market.assetType = assetType;
         market.quoteToken = quoteToken;
         market.minStake = minStake;
-        market.seedLiquidity = seedLiquidity;
         market.creator = msg.sender;
         market.outcomeLabels = outcomeLabels;
 
@@ -204,8 +200,7 @@ contract ShieldBet is ZamaEthereumConfig, Ownable {
             marketType,
             assetType,
             quoteToken,
-            minStake,
-            seedLiquidity
+            minStake
         );
     }
 
@@ -365,12 +360,15 @@ contract ShieldBet is ZamaEthereumConfig, Ownable {
         if (recovered != settlementSigner) revert InvalidSigner();
 
         uint256 userStake = stakeAmounts[marketId][msg.sender];
+        if (userStake > winningTotal) revert InvalidWinningTotal();
         uint256 fee = (totalPool[marketId] * PLATFORM_FEE_BPS) / MAX_BPS;
-        uint256 distributable = totalPool[marketId] + market.seedLiquidity - fee;
+        uint256 distributable = totalPool[marketId] - fee;
         uint256 payout = (userStake * distributable) / winningTotal;
         if (payout == 0) revert InvalidWinningTotal();
+        if (claimedPayouts[marketId] + payout > distributable) revert InvalidWinningTotal();
 
         hasClaimed[marketId][msg.sender] = true;
+        claimedPayouts[marketId] += payout;
         _transferAsset(market.assetType, market.quoteToken, msg.sender, payout);
         emit WinningsClaimed(marketId, msg.sender, payout, market.assetType);
     }
@@ -396,7 +394,6 @@ contract ShieldBet is ZamaEthereumConfig, Ownable {
             uint8 assetType,
             address quoteToken,
             uint256 minStake,
-            uint256 seedLiquidity,
             uint256 publishedWinningTotal,
             bool totalsOpened,
             bool winningTotalIsPublished
@@ -412,7 +409,6 @@ contract ShieldBet is ZamaEthereumConfig, Ownable {
             uint8(market.assetType),
             market.quoteToken,
             market.minStake,
-            market.seedLiquidity,
             market.publishedWinningTotal,
             marketTotalsOpened[marketId],
             winningTotalPublished[marketId]

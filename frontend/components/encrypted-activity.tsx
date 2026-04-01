@@ -19,10 +19,10 @@ export function EncryptedActivity({ marketId }: EncryptedActivityProps) {
         </span>
       </div>
 
-      <div className="surface-muted flex items-center justify-between px-3 py-2">
+      <div className="surface-muted flex items-center justify-between px-4 py-2">
         <div>
           <p className="text-sm font-medium text-slate-900 dark:text-slate-100">Public activity is hidden</p>
-          <p className="subtle text-xs">v1 shows privacy bands only. Exact timing and sizes remain hidden until settlement.</p>
+          <p className="subtle text-xs! mt-1">v1 shows privacy bands only. Exact timing and sizes remain hidden until settlement.</p>
         </div>
         <div className="flex items-center gap-2">
           <EncryptedBands count={bands} />

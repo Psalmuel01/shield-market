@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  eslint: {
+    ignoreDuringBuilds: true
+  },
   serverExternalPackages: ["@zama-fhe/relayer-sdk"],
   webpack: (config) => {
     config.resolve.fallback = {

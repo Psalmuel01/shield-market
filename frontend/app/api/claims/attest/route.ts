@@ -17,7 +17,7 @@ function getRpcUrl() {
 }
 
 function getSigningKey() {
-  return process.env.NEXT_PUBLIC_SETTLEMENT_SIGNER_PRIVATE_KEY || process.env.NEXT_PUBLIC_DEPLOYER_PRIVATE_KEY || "";
+  return process.env.SETTLEMENT_SIGNER_PRIVATE_KEY || process.env.DEPLOYER_PRIVATE_KEY || "";
 }
 
 export async function POST(request: NextRequest) {
@@ -65,16 +65,13 @@ export async function POST(request: NextRequest) {
   });
 
   const [
-    ,,
-    outcome,
-    status,
-    ,,
-    ,,
-    seedLiquidity,
     ,
-  ] = market as readonly [string, bigint, number, number, number, number, `0x${string}`, bigint, bigint, `0x${string}`, bigint, number, `0x${string}`, `0x${string}`, bigint];
+    ,
+    outcome,
+    status
+  ] = market as readonly [string, bigint, number, number, number, number, `0x${string}`, bigint, `0x${string}`, bigint, number, `0x${string}`, `0x${string}`, bigint];
 
-  const [,,,,,, , , publishedWinningTotal, , winningTotalIsPublished] = details as readonly [string, string, string, string, number, `0x${string}`, bigint, bigint, bigint, boolean, boolean];
+  const [,,,,,,, publishedWinningTotal, , winningTotalIsPublished] = details as readonly [string, string, string, string, number, `0x${string}`, bigint, bigint, boolean, boolean];
 
   if (status !== 4) {
     return NextResponse.json({ error: "Market is not finalized yet" }, { status: 409 });
@@ -103,7 +100,14 @@ export async function POST(request: NextRequest) {
   });
 
   const fee = (totalPool * 500n) / 10_000n;
-  const expectedPayoutWei = (stakeAmount * (totalPool + seedLiquidity - fee)) / publishedWinningTotal;
+  const distributable = totalPool - fee;
+  const expectedPayoutWei = (stakeAmount * distributable) / publishedWinningTotal;
+  if (expectedPayoutWei === 0n || expectedPayoutWei > distributable) {
+    return NextResponse.json(
+      { error: "Published winning total is invalid for this stake. Re-open settlement and publish the correct winning-side total." },
+      { status: 409 }
+    );
+  }
   const payoutDeadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 20);
 
   const account = privateKeyToAccount(privateKey as `0x${string}`);
@@ -144,7 +148,6 @@ export async function POST(request: NextRequest) {
     winningTotal: publishedWinningTotal.toString(),
     payoutDeadline: payoutDeadline.toString(),
     expectedPayoutWei: expectedPayoutWei.toString(),
-    seedLiquidity: seedLiquidity.toString(),
     signature
   });
 }

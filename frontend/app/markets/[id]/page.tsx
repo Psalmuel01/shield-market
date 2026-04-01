@@ -174,43 +174,60 @@ export default function MarketDetailPage() {
     return getMarketStatus(parsedMarket.status, parsedMarket.deadline);
   }, [parsedMarket]);
 
+  const [hasRevealedPosition, setHasRevealedPosition] = useState(false);
+
   useEffect(() => {
     setDecryptedPosition(null);
     setPositionRecoveryError(null);
+    setHasRevealedPosition(false);
   }, [marketId, myOutcomeHandle, address]);
 
   useEffect(() => {
-    if (!myOutcomeHandle || !address || !walletClient || decryptedPosition !== null || isDecrypting) return;
-
-    let cancelled = false;
-    async function recover() {
-      setIsDecrypting(true);
-      try {
-        const userAddress = address as `0x${string}`;
-        const signer = walletClient!;
-        const result = await decryptUserHandles({
-          contractAddress: shieldBetConfig.address,
-          userAddress,
-          walletClient: signer,
-          handles: [myOutcomeHandle as `0x${string}`]
-        });
-        if (!cancelled) {
-          setDecryptedPosition(Number(result[myOutcomeHandle as `0x${string}`]));
-          setPositionRecoveryError(null);
-        }
-      } catch (error) {
-        logError("market-detail", "failed to recover position", error);
-        if (!cancelled) setPositionRecoveryError("We could not recover your outcome locally for this wallet.");
-      } finally {
-        if (!cancelled) setIsDecrypting(false);
+    if (address && myOutcomeHandle && !hasRevealedPosition) {
+      const storageKey = `revealed-${marketId}-${address}`;
+      const hasRevealed = localStorage.getItem(storageKey) === 'true';
+      if (hasRevealed) {
+        revealPosition();
       }
     }
+  }, [address, myOutcomeHandle, hasRevealedPosition, marketId]);
 
-    void recover();
-    return () => {
-      cancelled = true;
-    };
-  }, [address, decryptedPosition, isDecrypting, myOutcomeHandle, walletClient]);
+  async function revealPosition() {
+    if (!myOutcomeHandle || !address || !walletClient) {
+      setPositionRecoveryError("Missing position handle or wallet connection.");
+      return;
+    }
+
+    setIsDecrypting(true);
+    setPositionRecoveryError(null);
+    try {
+      const userAddress = address as `0x${string}`;
+      const signer = walletClient;
+      const result = await decryptUserHandles({
+        contractAddress: shieldBetConfig.address,
+        userAddress,
+        walletClient: signer,
+        handles: [myOutcomeHandle as `0x${string}`]
+      });
+
+      const decrypted = result[myOutcomeHandle as `0x${string}`];
+      if (typeof decrypted === "number" || typeof decrypted === "bigint") {
+        setDecryptedPosition(Number(decrypted));
+        setPositionRecoveryError(null);
+        setHasRevealedPosition(true);
+        const storageKey = `revealed-${marketId}-${address}`;
+        localStorage.setItem(storageKey, 'true');
+      } else {
+        throw new Error("Decrypted value unavailable");
+      }
+    } catch (error) {
+      logError("market-detail", "failed to recover position", error);
+      setPositionRecoveryError("Could not decrypt your position. Please try again.");
+      setHasRevealedPosition(false);
+    } finally {
+      setIsDecrypting(false);
+    }
+  }
 
   if (!parsedMarket || !parsedDetails) {
     return (
@@ -235,11 +252,18 @@ export default function MarketDetailPage() {
   const winningTotalWei = parsedDetails.publishedWinningTotal;
   const totalPoolWei = typeof totalPool === "bigint" ? totalPool : 0n;
   const feeWei = (totalPoolWei * 500n) / 10_000n;
+  const distributableWei = totalPoolWei - feeWei;
   const expectedPayoutWei =
     decryptedPosition !== null && decryptedPosition === parsedMarket.outcome && winningTotalWei > 0n
-      ? (stakeWei * (totalPoolWei + parsedMarket.seedLiquidity - feeWei)) / winningTotalWei
+      ? (stakeWei * distributableWei) / winningTotalWei
       : 0n;
-  const canClaim = isFinalized && parsedDetails.winningTotalIsPublished && decryptedPosition === parsedMarket.outcome && !hasClaimed;
+  const hasValidClaimQuote = expectedPayoutWei > 0n && expectedPayoutWei <= distributableWei;
+  const canClaim =
+    isFinalized &&
+    parsedDetails.winningTotalIsPublished &&
+    decryptedPosition === parsedMarket.outcome &&
+    !hasClaimed &&
+    hasValidClaimQuote;
   const balanceLabel = assetLabel === "ETH"
     ? `${Number(formatEther(nativeBalance?.value || 0n)).toFixed(4)} ETH`
     : `${Number(formatUnits((tokenBalance as bigint) || 0n, tokenDecimals || 6)).toFixed(2)} ${tokenSymbol || "USDC"}`;
@@ -248,6 +272,12 @@ export default function MarketDetailPage() {
     return assetLabel === "ETH"
       ? parseEther(amount || "0")
       : parseUnits(amount || "0", tokenDecimals || 6);
+  }
+
+  function parseWinningTotalAmount() {
+    return assetLabel === "ETH"
+      ? parseEther(winningTotalInput || "0")
+      : parseUnits(winningTotalInput || "0", tokenDecimals || 6);
   }
 
   async function onPlaceBet() {
@@ -453,17 +483,22 @@ export default function MarketDetailPage() {
 
   async function onPublishWinningTotal() {
     if (!winningTotalInput.trim()) {
-      setStatusMessage("Enter the winning total in raw base units.");
+      setStatusMessage(`Enter the total stake on the winning side in ${assetLabel}.`);
       return;
     }
 
     setIsPublishingWinningTotal(true);
     setStatusMessage("Publishing winning total...");
     try {
+      const winningTotal = parseWinningTotalAmount();
+      if (winningTotal <= 0n || winningTotal > totalPoolWei) {
+        throw new Error("Winning total must be greater than zero and no larger than the full market pool.");
+      }
+
       const txHash = await writeContractAsync({
         ...shieldBetConfig,
         functionName: "publishWinningTotal",
-        args: [marketId, BigInt(winningTotalInput.trim())]
+        args: [marketId, winningTotal]
       });
       await publicClient?.waitForTransactionReceipt({ hash: txHash });
       await refetchMarket();
@@ -615,9 +650,9 @@ export default function MarketDetailPage() {
                 <div className="vm-stat-card__hint">Market threshold</div>
               </div>
               <div className="vm-stat-card">
-                <div className="vm-stat-card__label">Seed Liquidity</div>
-                <div className="vm-stat-card__value">{assetLabel === "ETH" ? `${Number(formatEther(parsedMarket.seedLiquidity)).toFixed(4)} ETH` : `${Number(formatUnits(parsedMarket.seedLiquidity, tokenDecimals || 6)).toFixed(2)} ${tokenSymbol || "USDC"}`}</div>
-                <div className="vm-stat-card__hint">Neutral creator liquidity</div>
+                <div className="vm-stat-card__label">Distributable Pool</div>
+                <div className="vm-stat-card__value">{assetLabel === "ETH" ? `${Number(formatEther(distributableWei)).toFixed(4)} ETH` : `${Number(formatUnits(distributableWei, tokenDecimals || 6)).toFixed(2)} ${tokenSymbol || "USDC"}`}</div>
+                <div className="vm-stat-card__hint">Pool after protocol fee</div>
               </div>
               <div className="vm-stat-card">
                 <div className="vm-stat-card__label">Winning Total</div>
@@ -731,7 +766,10 @@ export default function MarketDetailPage() {
                       </button>
                       {(isOwner || (address && owner && getAddress(address) === getAddress(owner as string))) ? (
                         <>
-                          <input value={winningTotalInput} onChange={(event) => setWinningTotalInput(event.target.value)} className="vm-input" placeholder="Winning total in raw base units" />
+                          <input value={winningTotalInput} onChange={(event) => setWinningTotalInput(event.target.value)} className="vm-input" placeholder={assetLabel === "ETH" ? "e.g. 1.25" : "e.g. 150"} />
+                          <p className="text-xs leading-6 text-white/55">
+                            Enter the full stake on the winning side in normal {assetLabel} units, not raw wei/base units.
+                          </p>
                           <button type="button" onClick={onPublishWinningTotal} disabled={isPublishingWinningTotal || !parsedDetails.totalsOpened} className="vm-primary-btn justify-center disabled:cursor-not-allowed disabled:opacity-50">
                             {isPublishingWinningTotal ? "Publishing..." : parsedDetails.winningTotalIsPublished ? "Winning Total Published" : "Publish Winning Total"}
                           </button>
@@ -772,14 +810,37 @@ export default function MarketDetailPage() {
             </div>
             {!address ? (
               <p className="text-sm leading-7 text-white/62">Connect your wallet to recover your local side, stake, and claim status.</p>
-            ) : !hasPosition ? (
-              <p className="text-sm leading-7 text-white/62">You have not placed a position in this market yet.</p>
             ) : (
               <div className="space-y-3 text-sm text-white/72">
                 <div className="flex items-center justify-between rounded-[1rem] border border-white/6 bg-white/[0.03] px-4 py-3">
                   <span>Recovered side</span>
-                  <span className="font-semibold text-white">{decryptedPosition !== null ? labels[decryptedPosition] : positionRecoveryError ? "Unavailable" : isDecrypting ? "Recovering..." : "Pending"}</span>
+                  <span className="font-semibold text-white">
+                    {decryptedPosition !== null
+                      ? status === "Finalized"
+                        ? decryptedPosition === parsedMarket.outcome
+                          ? "WON"
+                          : "LOST"
+                        : labels[decryptedPosition]
+                      : positionRecoveryError
+                        ? "Unavailable"
+                        : isDecrypting
+                          ? "Recovering..."
+                          : hasRevealedPosition
+                            ? "Not found"
+                            : "Encrypted"}
+                  </span>
                 </div>
+                {!decryptedPosition && !isDecrypting && !hasRevealedPosition ? (
+                  <button
+                    type="button"
+                    onClick={revealPosition}
+                    className="vm-secondary-btn w-full justify-center"
+                  >
+                    Reveal my position
+                  </button>
+                ) : null}
+                {positionRecoveryError ? <p className="text-red-300">{positionRecoveryError}</p> : null}
+
                 <div className="flex items-center justify-between rounded-[1rem] border border-white/6 bg-white/[0.03] px-4 py-3">
                   <span>Stake</span>
                   <span className="font-semibold text-white">{assetLabel === "ETH" ? `${Number(formatEther(stakeWei)).toFixed(4)} ETH` : `${Number(formatUnits(stakeWei, tokenDecimals || 6)).toFixed(2)} ${tokenSymbol || "USDC"}`}</span>
@@ -791,6 +852,11 @@ export default function MarketDetailPage() {
                 {expectedPayoutWei > 0n ? (
                   <div className="rounded-[1rem] border border-emerald-400/18 bg-emerald-400/10 px-4 py-3 text-emerald-300">
                     Expected payout: {assetLabel === "ETH" ? `${Number(formatEther(expectedPayoutWei)).toFixed(4)} ETH` : `${Number(formatUnits(expectedPayoutWei, tokenDecimals || 6)).toFixed(2)} ${tokenSymbol || "USDC"}`}
+                  </div>
+                ) : null}
+                {parsedDetails.winningTotalIsPublished && decryptedPosition === parsedMarket.outcome && !hasValidClaimQuote ? (
+                  <div className="rounded-[1rem] border border-amber-400/18 bg-amber-400/10 px-4 py-3 text-amber-200">
+                    The published winning total looks inconsistent with your stake. Re-open settlement and publish the correct total before claiming.
                   </div>
                 ) : null}
                 {canClaim ? (

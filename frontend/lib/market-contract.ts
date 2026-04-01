@@ -7,7 +7,6 @@ export interface DecodedMarketView {
   assetType: number;
   quoteToken: `0x${string}`;
   minStake: bigint;
-  seedLiquidity: bigint;
   creator: `0x${string}`;
   disputeWindowEnd: bigint;
   proposedOutcome: number;
@@ -24,7 +23,6 @@ export interface DecodedMarketDetails {
   assetType: number;
   quoteToken: `0x${string}`;
   minStake: bigint;
-  seedLiquidity: bigint;
   publishedWinningTotal: bigint;
   totalsOpened: boolean;
   winningTotalIsPublished: boolean;
@@ -38,7 +36,7 @@ export function decodeMarketView(result: unknown): DecodedMarketView | null {
   if (!result) return null;
 
   const asArray = Array.isArray(result) ? result : null;
-  if (asArray && asArray.length >= 15) {
+  if (asArray && asArray.length >= 14) {
     const [
       question, 
       deadline, 
@@ -48,7 +46,6 @@ export function decodeMarketView(result: unknown): DecodedMarketView | null {
       assetType,
       quoteToken,
       minStake,
-      seedLiquidity,
       creator, 
       disputeWindowEnd, 
       proposedOutcome, 
@@ -66,7 +63,6 @@ export function decodeMarketView(result: unknown): DecodedMarketView | null {
       typeof assetType === "number" &&
       isAddress(quoteToken) &&
       typeof minStake === "bigint" &&
-      typeof seedLiquidity === "bigint" &&
       isAddress(creator) &&
       typeof disputeWindowEnd === "bigint" &&
       typeof proposedOutcome === "number" &&
@@ -83,7 +79,6 @@ export function decodeMarketView(result: unknown): DecodedMarketView | null {
         assetType,
         quoteToken,
         minStake,
-        seedLiquidity,
         creator,
         disputeWindowEnd,
         proposedOutcome,
@@ -105,7 +100,6 @@ export function decodeMarketView(result: unknown): DecodedMarketView | null {
       typeof market.assetType === "number" &&
       isAddress(market.quoteToken) &&
       typeof market.minStake === "bigint" &&
-      typeof market.seedLiquidity === "bigint" &&
       isAddress(market.creator) &&
       typeof market.disputeWindowEnd === "bigint" &&
       typeof market.proposedOutcome === "number" &&
@@ -124,7 +118,7 @@ export function decodeMarketDetails(result: unknown): DecodedMarketDetails | nul
   if (!result) return null;
 
   const asArray = Array.isArray(result) ? result : null;
-  if (asArray && asArray.length >= 11) {
+  if (asArray && asArray.length >= 10) {
     const [
       category,
       resolutionCriteria,
@@ -133,7 +127,6 @@ export function decodeMarketDetails(result: unknown): DecodedMarketDetails | nul
       assetType,
       quoteToken,
       minStake,
-      seedLiquidity,
       publishedWinningTotal,
       totalsOpened,
       winningTotalIsPublished
@@ -146,7 +139,6 @@ export function decodeMarketDetails(result: unknown): DecodedMarketDetails | nul
       typeof assetType === "number" &&
       isAddress(quoteToken) &&
       typeof minStake === "bigint" &&
-      typeof seedLiquidity === "bigint" &&
       typeof publishedWinningTotal === "bigint" &&
       typeof totalsOpened === "boolean" &&
       typeof winningTotalIsPublished === "boolean"
@@ -159,7 +151,6 @@ export function decodeMarketDetails(result: unknown): DecodedMarketDetails | nul
         assetType,
         quoteToken,
         minStake,
-        seedLiquidity,
         publishedWinningTotal,
         totalsOpened,
         winningTotalIsPublished
@@ -177,7 +168,6 @@ export function decodeMarketDetails(result: unknown): DecodedMarketDetails | nul
       typeof details.assetType === "number" &&
       isAddress(details.quoteToken) &&
       typeof details.minStake === "bigint" &&
-      typeof details.seedLiquidity === "bigint" &&
       typeof details.publishedWinningTotal === "bigint" &&
       typeof details.totalsOpened === "boolean" &&
       typeof details.winningTotalIsPublished === "boolean"

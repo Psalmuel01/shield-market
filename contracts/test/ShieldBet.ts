@@ -48,13 +48,12 @@ describe("ShieldBet", function () {
     await advanceTo(timestamp + secondsAfter);
   }
 
-  async function createEthMarket(shieldBet: any, creator: any, overrides?: { marketType?: number; labels?: string[]; minStake?: bigint; seedLiquidity?: bigint }) {
+  async function createEthMarket(shieldBet: any, creator: any, overrides?: { marketType?: number; labels?: string[]; minStake?: bigint }) {
     const latestBlock = await ethers.provider.getBlock("latest");
     const deadline = BigInt((latestBlock?.timestamp || 0) + 3600);
     const labels = overrides?.labels || ["YES", "NO"];
     const marketType = overrides?.marketType ?? 0;
     const minStake = overrides?.minStake ?? ethers.parseEther("0.1");
-    const seedLiquidity = overrides?.seedLiquidity ?? ethers.parseEther("0.25");
 
     await shieldBet.connect(creator).createMarketWithMetadata(
       "Will ShieldBet ship the realigned v2 flow?",
@@ -67,20 +66,16 @@ describe("ShieldBet", function () {
       "Optimistic oracle with admin fallback",
       0,
       ethers.ZeroAddress,
-      minStake,
-      seedLiquidity,
-      { value: seedLiquidity }
+      minStake
     );
 
-    return { deadline, minStake, seedLiquidity };
+    return { deadline, minStake };
   }
 
   async function createUsdcMarket(shieldBet: any, mockUsdc: any, creator: any) {
     const latestBlock = await ethers.provider.getBlock("latest");
     const deadline = BigInt((latestBlock?.timestamp || 0) + 7200);
-    const seedLiquidity = 50_000_000n;
     const minStake = 5_000_000n;
-    await mockUsdc.connect(creator).approve(await shieldBet.getAddress(), seedLiquidity);
 
     await shieldBet.connect(creator).createMarketWithMetadata(
       "Which network will ShieldBet launch on first?",
@@ -93,11 +88,10 @@ describe("ShieldBet", function () {
       "Optimistic oracle with admin fallback",
       1,
       await mockUsdc.getAddress(),
-      minStake,
-      seedLiquidity
+      minStake
     );
 
-    return { deadline, minStake, seedLiquidity };
+    return { deadline, minStake };
   }
 
   function claimDomain(contractAddress: string, chainId: bigint) {
@@ -133,14 +127,13 @@ describe("ShieldBet", function () {
 
   it("creates a binary ETH market with config and preserves encrypted side for the bettor", async function () {
     const { shieldBet, alice } = await deployFixture();
-    const { deadline, minStake, seedLiquidity } = await createEthMarket(shieldBet, alice);
+    const { deadline, minStake } = await createEthMarket(shieldBet, alice);
 
     const market = await shieldBet.markets(1);
     expect(market.deadline).to.equal(deadline);
     expect(market.marketType).to.equal(0n);
     expect(market.assetType).to.equal(0n);
     expect(market.minStake).to.equal(minStake);
-    expect(market.seedLiquidity).to.equal(seedLiquidity);
 
     const details = await shieldBet.getMarketDetails(1);
     expect(details[0]).to.equal("Crypto");
@@ -159,10 +152,8 @@ describe("ShieldBet", function () {
 
   it("creates a categorical USDC market and accepts ERC20 stakes", async function () {
     const { shieldBet, mockUsdc, alice, bob } = await deployFixture();
-    const { minStake, seedLiquidity } = await createUsdcMarket(shieldBet, mockUsdc, alice);
+    const { minStake } = await createUsdcMarket(shieldBet, mockUsdc, alice);
     const contractAddress = await shieldBet.getAddress();
-
-    expect(await mockUsdc.balanceOf(contractAddress)).to.equal(seedLiquidity);
 
     const encrypted = await encryptOutcome(contractAddress, bob.address, 2);
     const stake = 12_500_000n;
@@ -171,7 +162,7 @@ describe("ShieldBet", function () {
 
     expect(await shieldBet.totalPool(1)).to.equal(stake);
     expect(await shieldBet.stakeAmounts(1, bob.address)).to.equal(stake);
-    expect(await mockUsdc.balanceOf(contractAddress)).to.equal(seedLiquidity + stake);
+    expect(await mockUsdc.balanceOf(contractAddress)).to.equal(stake);
     expect(minStake).to.equal(5_000_000n);
   });
 
@@ -245,7 +236,7 @@ describe("ShieldBet", function () {
 
   it("requires published winning totals before automatic claims and pays winners pro-rata on ETH markets", async function () {
     const { shieldBet, owner, alice, bob, carol } = await deployFixture();
-    const { deadline, seedLiquidity } = await createEthMarket(shieldBet, owner, { seedLiquidity: ethers.parseEther("0.5") });
+    const { deadline } = await createEthMarket(shieldBet, owner);
     const contractAddress = await shieldBet.getAddress();
     const chainId = (await ethers.provider.getNetwork()).chainId;
 
@@ -287,7 +278,7 @@ describe("ShieldBet", function () {
 
     const totalPool = ethers.parseEther("4");
     const fee = (totalPool * 500n) / 10_000n;
-    const distributable = totalPool + seedLiquidity - fee;
+    const distributable = totalPool - fee;
     const aliceExpected = (ethers.parseEther("1") * distributable) / ethers.parseEther("3");
     const bobExpected = (ethers.parseEther("2") * distributable) / ethers.parseEther("3");
 
@@ -308,7 +299,7 @@ describe("ShieldBet", function () {
 
   it("supports automatic claims on USDC markets after winning total publication", async function () {
     const { shieldBet, mockUsdc, owner, alice, bob } = await deployFixture();
-    const { deadline, seedLiquidity } = await createUsdcMarket(shieldBet, mockUsdc, owner);
+    const { deadline } = await createUsdcMarket(shieldBet, mockUsdc, owner);
     const contractAddress = await shieldBet.getAddress();
     const chainId = (await ethers.provider.getNetwork()).chainId;
 
@@ -340,7 +331,7 @@ describe("ShieldBet", function () {
 
     const totalPool = 25_000_000n;
     const fee = (totalPool * 500n) / 10_000n;
-    const distributable = totalPool + seedLiquidity - fee;
+    const distributable = totalPool - fee;
     const bobExpected = (15_000_000n * distributable) / 15_000_000n;
 
     const before = await mockUsdc.balanceOf(bob.address);

@@ -64,7 +64,6 @@ export const shieldBetAbi = [
       { name: "assetType", type: "uint8" },
       { name: "quoteToken", type: "address" },
       { name: "minStake", type: "uint256" },
-      { name: "seedLiquidity", type: "uint256" },
       { name: "creator", type: "address" },
       { name: "disputeWindowEnd", type: "uint256" },
       { name: "proposedOutcome", type: "uint8" },
@@ -161,7 +160,6 @@ export const shieldBetAbi = [
       { name: "assetType", type: "uint8" },
       { name: "quoteToken", type: "address" },
       { name: "minStake", type: "uint256" },
-      { name: "seedLiquidity", type: "uint256" }
     ],
     outputs: [{ name: "marketId", type: "uint256" }]
   },
@@ -178,7 +176,6 @@ export const shieldBetAbi = [
       { name: "assetType", type: "uint8" },
       { name: "quoteToken", type: "address" },
       { name: "minStake", type: "uint256" },
-      { name: "seedLiquidity", type: "uint256" },
       { name: "publishedWinningTotal", type: "uint256" },
       { name: "totalsOpened", type: "bool" },
       { name: "winningTotalIsPublished", type: "bool" }
