@@ -1,5 +1,7 @@
 # ShieldBet
 
+> See Demo Video [here](https://youtu.be/BzJizrbWMvs)
+
 ShieldBet is a confidential prediction market prototype built with Zama fhEVM and a Next.js frontend.
 
 This stabilized v1 uses an **owner-driven settlement model**:
