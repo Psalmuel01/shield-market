@@ -17,7 +17,7 @@ function getRpcUrl() {
 }
 
 function getSigningKey() {
-  return process.env.SETTLEMENT_SIGNER_PRIVATE_KEY || process.env.DEPLOYER_PRIVATE_KEY || "";
+  return process.env.NEXT_PUBLIC_SETTLEMENT_SIGNER_PRIVATE_KEY || process.env.NEXT_PUBLIC_DEPLOYER_PRIVATE_KEY || "";
 }
 
 export async function POST(request: NextRequest) {
